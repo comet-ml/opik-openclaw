@@ -5,7 +5,7 @@ import type {
 } from "openclaw/plugin-sdk";
 import { onDiagnosticEvent } from "openclaw/plugin-sdk";
 import { Opik } from "opik";
-import type { ActiveTrace } from "./types.js";
+import { parseOpikPluginConfig, type ActiveTrace, type OpikPluginConfig } from "./types.js";
 
 /** Map OpenClaw usage fields to Opik's expected token field names. */
 function mapUsageToOpikTokens(
@@ -63,11 +63,24 @@ function closeActiveTrace(active: ActiveTrace): void {
   }
 }
 
-export function createOpikService(api: OpenClawPluginApi): OpenClawPluginService {
+function readLegacyOpikConfig(config: unknown): OpikPluginConfig {
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    return {};
+  }
+  const root = config as Record<string, unknown>;
+  return parseOpikPluginConfig(root.opik);
+}
+
+export function createOpikService(
+  api: OpenClawPluginApi,
+  pluginConfig: OpikPluginConfig = {},
+): OpenClawPluginService {
   let client: Opik | null = null;
   const activeTraces = new Map<string, ActiveTrace>();
   let cleanup: (() => void) | null = null;
   let spanSeq = 0;
+  let lastActiveSessionKey: string | undefined;
+  let warnedMissingAfterToolSessionKey = false;
 
   /** Consolidate output + metadata into a single trace.update() + trace.end(). */
   function finalizeTrace(sessionKey: string): void {
@@ -134,7 +147,8 @@ export function createOpikService(api: OpenClawPluginApi): OpenClawPluginService
   return {
     id: "opik",
     async start(ctx) {
-      const opikCfg = ctx.config.opik;
+      const legacyCfg = readLegacyOpikConfig(ctx.config);
+      const opikCfg: OpikPluginConfig = { ...legacyCfg, ...pluginConfig };
 
       if (!opikCfg?.enabled) {
         return;
@@ -160,6 +174,7 @@ export function createOpikService(api: OpenClawPluginApi): OpenClawPluginService
         if (!client) return;
         const sessionKey = agentCtx.sessionKey;
         if (!sessionKey) return;
+        lastActiveSessionKey = sessionKey;
 
         // Close any pre-existing trace for this session to avoid leaks
         const existing = activeTraces.get(sessionKey);
@@ -221,6 +236,7 @@ export function createOpikService(api: OpenClawPluginApi): OpenClawPluginService
         if (!client) return;
         const sessionKey = agentCtx.sessionKey;
         if (!sessionKey) return;
+        lastActiveSessionKey = sessionKey;
 
         const active = activeTraces.get(sessionKey);
         if (!active?.llmSpan) return;
@@ -262,6 +278,7 @@ export function createOpikService(api: OpenClawPluginApi): OpenClawPluginService
         if (!client) return;
         const sessionKey = toolCtx.sessionKey;
         if (!sessionKey) return;
+        lastActiveSessionKey = sessionKey;
 
         const active = activeTraces.get(sessionKey);
         if (!active) return;
@@ -284,8 +301,22 @@ export function createOpikService(api: OpenClawPluginApi): OpenClawPluginService
       // =====================================================================
       api.on("after_tool_call", (event, toolCtx) => {
         if (!client) return;
-        const sessionKey = toolCtx.sessionKey;
+        let sessionKey = toolCtx.sessionKey;
+        if (!sessionKey) {
+          if (activeTraces.size === 1) {
+            sessionKey = activeTraces.keys().next().value as string | undefined;
+          } else if (lastActiveSessionKey && activeTraces.has(lastActiveSessionKey)) {
+            sessionKey = lastActiveSessionKey;
+          }
+          if (sessionKey && !warnedMissingAfterToolSessionKey) {
+            warnedMissingAfterToolSessionKey = true;
+            ctx.logger.warn(
+              "opik: after_tool_call missing sessionKey; using fallback correlation (concurrent sessions may mismatch tool spans)",
+            );
+          }
+        }
         if (!sessionKey) return;
+        lastActiveSessionKey = sessionKey;
 
         const active = activeTraces.get(sessionKey);
         if (!active) return;
