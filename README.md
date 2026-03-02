@@ -128,17 +128,6 @@ npm run test
 npm run smoke
 ```
 
-## Release and publishing
-
-This package is published as `@opik/openclaw-opik` through GitHub Actions trusted publishing.
-
-1. Update `package.json` version on `main` (for example `npm version patch`).
-2. Push commit + tag to GitHub (`git push origin main --follow-tags`).
-3. Create a GitHub Release from the version tag (must match `v<package.json version>`).
-4. `.github/workflows/release.yml` validates tag/version parity, runs checks, then publishes with provenance.
-
-For trusted publishing, npm package settings must trust this repository/workflow identity.
-
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
