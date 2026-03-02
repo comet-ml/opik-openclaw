@@ -1,4 +1,4 @@
-# Draft Release Notes - `@comet-ml/openclaw-opik`
+# Draft Release Notes - `@opik/openclaw-opik`
 
 ## Version Bump Plan
 
