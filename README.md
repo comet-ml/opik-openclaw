@@ -19,13 +19,13 @@ Community plugin for <a href="https://github.com/openclaw/openclaw">OpenClaw</a>
 <div align="center">
 
 [![License](https://img.shields.io/github/license/comet-ml/opik-openclaw)](https://github.com/comet-ml/opik-openclaw/blob/main/LICENSE)
-[![npm version](https://img.shields.io/npm/v/%40opik%2Fopenclaw-opik)](https://www.npmjs.com/package/@opik/openclaw-opik)
+[![npm version](https://img.shields.io/npm/v/%40opik%2Fopik-openclaw)](https://www.npmjs.com/package/@opik/opik-openclaw)
 
 </div>
 
 ## What this plugin gives you
 
-`@opik/openclaw-opik` adds native Opik tracing for OpenClaw runs:
+`@opik/opik-openclaw` adds native Opik tracing for OpenClaw runs:
 
 - LLM request/response spans
 - tool call spans with inputs, outputs, and errors
