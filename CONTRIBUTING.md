@@ -1,6 +1,6 @@
 # Contributing to OpenClaw Opik Plugin
 
-Thanks for contributing to `@comet-ml/openclaw-opik`.
+Thanks for contributing to `@opik/openclaw-opik`.
 
 ## Before opening an issue
 
@@ -64,6 +64,11 @@ If you use GitHub CLI, common commands are:
 gh pr create --draft
 gh pr view --web
 ```
+
+## Releases
+
+- Publish source of truth is GitHub Release + `.github/workflows/release.yml`.
+- Release tags must match `package.json` version exactly as `v<version>`.
 
 ## Commit and review expectations
 
