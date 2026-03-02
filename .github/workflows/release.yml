@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Setup npm
+        run: npm install -g npm@11.6.2
+
+      - name: Validate release tag matches package version
+        id: verify
+        run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          TAG_NAME="${{ github.event.release.tag_name }}"
+
+          if [ -z "$TAG_NAME" ]; then
+            echo "release.tag_name is empty. This workflow only publishes from a GitHub Release."
+            exit 1
+          fi
+
+          EXPECTED_TAG="v${PACKAGE_VERSION}"
+
+          if [ "$TAG_NAME" != "$EXPECTED_TAG" ]; then
+            echo "Tag/version mismatch."
+            echo "Expected tag: $EXPECTED_TAG"
+            echo "Actual tag:   $TAG_NAME"
+            echo "package.json version: $PACKAGE_VERSION"
+            exit 1
+          fi
+
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if this version is already published
+        id: exists
+        run: |
+          if npm view "${{ steps.verify.outputs.package_name }}@${{ steps.verify.outputs.package_version }}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.exists.outputs.already_published == 'false'
+        run: npm ci
+
+      - name: Run lint
+        if: steps.exists.outputs.already_published == 'false'
+        run: npm run lint
+
+      - name: Run typecheck
+        if: steps.exists.outputs.already_published == 'false'
+        run: npm run typecheck
+
+      - name: Run tests
+        if: steps.exists.outputs.already_published == 'false'
+        run: npm run test
+
+      - name: Run smoke tests
+        if: steps.exists.outputs.already_published == 'false'
+        run: npm run smoke
+
+      - name: Verify package payload
+        if: steps.exists.outputs.already_published == 'false'
+        run: npm pack --dry-run
+
+      - name: Publish to npm with provenance
+        if: steps.exists.outputs.already_published == 'false'
+        run: npm publish --provenance --access public
+
+      - name: Report already-published release
+        if: steps.exists.outputs.already_published == 'true'
+        run: |
+          echo "Skipping publish: ${{ steps.verify.outputs.package_name }}@${{ steps.verify.outputs.package_version }} already exists on npm."
