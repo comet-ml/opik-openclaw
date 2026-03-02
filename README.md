@@ -1,35 +1,63 @@
-# @comet-ml/openclaw-opik
+<h1 align="center" style="border-bottom: none">
+  <div>
+    <a href="https://www.comet.com/site/products/opik/">
+      <img alt="Comet Opik logo" src="https://raw.githubusercontent.com/comet-ml/opik-mcp/refs/heads/main/docs/assets/logo-light-mode.svg" width="200" />
+    </a>
+    <br />
+    OpenClaw Opik Plugin
+  </div>
+</h1>
 
-Export OpenClaw agent traces to [Opik](https://www.comet.com/docs/opik/) for
-LLM observability — see prompts, completions, tool calls, token usage, and
-costs in the Opik UI.
+<p align="center">
+Community plugin for <a href="https://github.com/openclaw/openclaw">OpenClaw</a> that exports agent traces to <a href="https://www.comet.com/docs/opik/">Opik</a>.
+</p>
 
-The Opik plugin runs **inside the Gateway process**. If you use a remote
-Gateway, install and configure the plugin on that machine, then restart the
-Gateway to load it.
+<div align="center">
 
-## Setup
+[![License](https://img.shields.io/github/license/comet-ml/opik-openclaw)](https://github.com/comet-ml/opik-openclaw/blob/main/LICENSE)
+[![npm version](https://img.shields.io/npm/v/@comet-ml/openclaw-opik)](https://www.npmjs.com/package/@comet-ml/openclaw-opik)
 
-### Interactive wizard (recommended)
+</div>
+
+## Why this plugin
+
+`@comet-ml/openclaw-opik` adds native Opik tracing for OpenClaw workflows:
+
+- LLM request/response spans
+- Tool call spans and outputs
+- Agent lifecycle finalization
+- Token usage and cost metadata
+
+The plugin runs inside the OpenClaw Gateway process. If Gateway is remote, install/configure the plugin on that host.
+
+## Quickstart
+
+### 1. Configure from OpenClaw CLI
 
 ```bash
 openclaw opik configure
 ```
 
-The wizard validates your URL and API key, auto-detects local instances, and
-writes the config for you. Restart the Gateway afterwards.
+This validates endpoint and credentials and writes plugin-scoped config under `plugins.entries.opik`.
 
-### CLI config commands
+### 2. Check effective configuration
 
 ```bash
-openclaw config set plugins.entries.opik.enabled true
-openclaw config set plugins.entries.opik.config.apiKey "your-api-key"
-openclaw config set plugins.entries.opik.config.projectName "my-openclaw"
+openclaw opik status
 ```
 
-### Manual config
+### 3. Verify trace export
 
-Add to your `~/.openclaw/config.json`:
+```bash
+openclaw gateway run
+openclaw message send "hello from openclaw"
+```
+
+Then confirm traces in your Opik project.
+
+## Configuration
+
+### Plugin-scoped config (recommended)
 
 ```json
 {
@@ -40,7 +68,10 @@ Add to your `~/.openclaw/config.json`:
         "config": {
           "enabled": true,
           "apiKey": "your-api-key",
-          "projectName": "my-openclaw"
+          "apiUrl": "https://www.comet.com/opik/api",
+          "projectName": "openclaw",
+          "workspaceName": "default",
+          "tags": ["openclaw"]
         }
       }
     }
@@ -48,92 +79,50 @@ Add to your `~/.openclaw/config.json`:
 }
 ```
 
-### Self-hosted / local Opik
+### Environment fallbacks
 
-```json
-{
-  "plugins": {
-    "entries": {
-      "opik": {
-        "enabled": true,
-        "config": {
-          "enabled": true,
-          "apiUrl": "http://localhost:5173/api",
-          "projectName": "openclaw-local"
-        }
-      }
-    }
-  }
-}
-```
+- `OPIK_API_KEY`
+- `OPIK_URL_OVERRIDE`
+- `OPIK_PROJECT_NAME`
+- `OPIK_WORKSPACE`
 
 ## CLI commands
 
-| Command                   | Description                     |
-| ------------------------- | ------------------------------- |
-| `openclaw opik configure` | Interactive setup wizard        |
-| `openclaw opik status`    | Show current Opik configuration |
+| Command | Description |
+| --- | --- |
+| `openclaw opik configure` | Interactive setup wizard |
+| `openclaw opik status` | Print effective Opik configuration |
 
-## Check status
+## Data mapping
+
+| OpenClaw event | Opik entity | Notes |
+| --- | --- | --- |
+| `llm_input` | trace + llm span | Creates trace and starts model span |
+| `llm_output` | llm span update/end | Updates usage/output and closes span |
+| `before_tool_call` | tool span start | Captures tool name and input |
+| `after_tool_call` | tool span update/end | Captures result/error and duration |
+| `agent_end` | trace finalize | Consolidates deferred metadata |
+
+## Known limitations
+
+OpenClaw embedded tool handlers can emit `after_tool_call` without `sessionKey` in some paths. This plugin applies a deterministic fallback (active-session map/latest active trace), but concurrent multi-session tool traffic can still mis-correlate a span.
+
+No OpenClaw core changes are included in this repository.
+
+## Development
 
 ```bash
-openclaw opik status
+npm ci
+npm run lint
+npm run typecheck
+npm run test
+npm run smoke
 ```
 
-## Verify traces
+## Contributing
 
-1. Start the Gateway (`openclaw gateway run`).
-2. Send a message: `openclaw message send "Hello, trace me"`.
-3. Look for `opik: exporting traces to project "openclaw"` in the
-   Gateway log.
-4. Open the Opik UI — traces appear under your project within a few seconds.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
 
-## What Gets Traced
+## License
 
-| Event       | Opik Entity      | Data                                                                   |
-| ----------- | ---------------- | ---------------------------------------------------------------------- |
-| LLM call    | Trace + LLM Span | Prompt, system prompt, history, response, model, provider, token usage |
-| Tool call   | Tool Span        | Tool name, input params, output/result, errors, duration               |
-| Agent run   | Trace            | Duration, success/error, cost                                          |
-| Model usage | Trace metadata   | Cost (USD), context window utilization                                 |
-
-## Environment Variables
-
-| Variable            | Description            | Default                          |
-| ------------------- | ---------------------- | -------------------------------- |
-| `OPIK_API_KEY`      | API key for Opik Cloud | —                                |
-| `OPIK_URL_OVERRIDE` | Opik API endpoint      | `https://www.comet.com/opik/api` |
-| `OPIK_PROJECT_NAME` | Project name in Opik   | `openclaw`                       |
-| `OPIK_WORKSPACE`    | Workspace name         | `default`                        |
-
-## Config Options
-
-| Key                                    | Type       | Default                 | Description                                |
-| -------------------------------------- | ---------- | ----------------------- | ------------------------------------------ |
-| `plugins.entries.opik.enabled`         | `boolean`  | plugin-default          | Enable/disable plugin loading              |
-| `plugins.entries.opik.config.enabled`  | `boolean`  | `true`                  | Enable/disable trace export after load     |
-| `plugins.entries.opik.config.apiKey`   | `string`   | env `OPIK_API_KEY`      | API key                                    |
-| `plugins.entries.opik.config.apiUrl`   | `string`   | env `OPIK_URL_OVERRIDE` | API endpoint                               |
-| `plugins.entries.opik.config.projectName` | `string` | `"openclaw"`            | Project name                               |
-| `plugins.entries.opik.config.workspaceName` | `string` | `"default"`           | Workspace name                             |
-| `plugins.entries.opik.config.tags`     | `string[]` | `["openclaw"]`          | Default tags applied to new traces         |
-
-## Troubleshooting
-
-- **Traces not appearing** — Check `openclaw opik status` shows `Enabled: yes`
-  and the Gateway log contains `opik: exporting traces to project "openclaw"`.
-  If missing, verify `plugins.entries.opik.enabled` and
-  `plugins.entries.opik.config.enabled` are both `true`, then restart the Gateway.
-- **API key rejected** — Re-run `openclaw opik configure` to re-validate. For
-  self-hosted instances without auth, remove
-  `plugins.entries.opik.config.apiKey` from your config.
-- **Self-hosted not reachable** — Verify with `curl <url>/api/health`. Local
-  instances use `/api`, cloud/self-hosted use `/opik/api`. Check firewall rules
-  if Gateway and Opik are on different hosts.
-- **Tool spans missing/crossed in high concurrency** — Some OpenClaw embedded
-  paths currently omit `sessionKey` in `after_tool_call`. This plugin uses a
-  best-effort fallback (single active trace or latest active session), which can
-  mis-correlate tool spans if multiple sessions are active concurrently.
-
-For the full setup guide, see
-[docs.openclaw.ai/plugins/opik](https://docs.openclaw.ai/plugins/opik).
+Apache 2.0
