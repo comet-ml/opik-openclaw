@@ -1,6 +1,6 @@
 # Contributing to OpenClaw Opik Plugin
 
-Thanks for contributing to `@opik/openclaw-opik`.
+Thanks for contributing to `@opik/opik-openclaw`.
 
 ## Before opening an issue
 
