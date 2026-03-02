@@ -18,7 +18,7 @@ Community plugin for <a href="https://github.com/openclaw/openclaw">OpenClaw</a>
 
 <div align="center">
 
-[![License](https://img.shields.io/github/license/comet-ml/opik-openclaw)](https://github.com/comet-ml/opik-openclaw/blob/main/LICENSE)
+[![License](https://img.shields.io/npm/l/%40opik%2Fopik-openclaw)](https://www.npmjs.com/package/@opik/opik-openclaw)
 [![npm version](https://img.shields.io/npm/v/%40opik%2Fopik-openclaw)](https://www.npmjs.com/package/@opik/opik-openclaw)
 
 </div>
@@ -134,4 +134,4 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
 
 ## License
 
-Apache 2.0
+[Apache-2.0](./LICENSE)
