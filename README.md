@@ -25,7 +25,7 @@ Community plugin for <a href="https://github.com/openclaw/openclaw">OpenClaw</a>
 
 ## What this plugin gives you
 
-`@comet-ml/openclaw-opik` adds native Opik tracing for OpenClaw runs:
+`@opik/openclaw-opik` adds native Opik tracing for OpenClaw runs:
 
 - LLM request/response spans
 - tool call spans with inputs, outputs, and errors
@@ -130,7 +130,7 @@ npm run smoke
 
 ## Release status
 
-The npm package name is reserved (`@comet-ml/openclaw-opik`), but public npm publication is intentionally gated.
+The npm package name is reserved (`@opik/openclaw-opik`), but public npm publication is intentionally gated.
 
 ## Contributing
 
