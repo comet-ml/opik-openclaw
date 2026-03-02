@@ -1,6 +1,6 @@
 {
   "name": "@comet-ml/openclaw-opik",
-  "version": "2026.2.16",
+  "version": "0.1.0",
   "description": "OpenClaw Opik exporter — sends LLM traces to Opik",
   "type": "module",
   "engines": {
