@@ -114,8 +114,8 @@ function agentCtx(sessionKey: string | undefined, extra: Record<string, unknown>
   return { sessionKey, agentId: "agent-1", messageProvider: "telegram", ...extra };
 }
 
-function toolCtx(sessionKey: string | undefined) {
-  return { sessionKey };
+function toolCtx(sessionKey: string | undefined, extra: Record<string, unknown> = {}) {
+  return { sessionKey, ...extra };
 }
 
 // ---------------------------------------------------------------------------
@@ -610,6 +610,49 @@ describe("opik service", () => {
       expect(mockToolSpan.end).toHaveBeenCalled();
     });
 
+    test("uses after_tool_call params and duration metadata when provided", async () => {
+      const { api, hooks } = createApi();
+      const mockToolSpan = opikState.createMockSpan();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "m", provider: "p", prompt: "" },
+        agentCtx("s1", { agentId: "agent-42" }),
+      );
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        { toolName: "search", params: { query: "old" } },
+        toolCtx("s1", { agentId: "agent-42" }),
+      );
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        {
+          toolName: "search",
+          params: { query: "new", limit: 3 },
+          result: { ok: true },
+          durationMs: 91,
+        },
+        toolCtx("s1", { agentId: "agent-42" }),
+      );
+
+      expect(mockToolSpan.update).toHaveBeenCalledWith({
+        input: { query: "new", limit: 3 },
+        metadata: { durationMs: 91, agentId: "agent-42" },
+        output: { ok: true },
+      });
+      expect(mockToolSpan.end).toHaveBeenCalled();
+    });
+
     test("wraps non-object results in { result: value }", async () => {
       const { api, hooks } = createApi();
       const mockToolSpan = opikState.createMockSpan();
@@ -726,6 +769,72 @@ describe("opik service", () => {
       expect(ctx.logger.warn).toHaveBeenCalledTimes(1);
       expect(ctx.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining("after_tool_call missing sessionKey"),
+      );
+    });
+
+    test("falls back via agentId when sessionKey is missing and multiple traces are active", async () => {
+      const { api, hooks } = createApi();
+      const traceA = opikState.createMockTrace();
+      const traceB = opikState.createMockTrace();
+      const llmSpanA = opikState.createMockSpan();
+      const toolSpanA = opikState.createMockSpan();
+      const llmSpanB = opikState.createMockSpan();
+      const toolSpanB = opikState.createMockSpan();
+
+      traceA.span.mockReturnValueOnce(llmSpanA).mockReturnValueOnce(toolSpanA);
+      traceB.span.mockReturnValueOnce(llmSpanB).mockReturnValueOnce(toolSpanB);
+      mockTraceFn.mockReturnValueOnce(traceA).mockReturnValueOnce(traceB);
+
+      const service = createOpikService(api as any);
+      const ctx = createServiceContext() as any;
+      await service.start(ctx);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "m", provider: "p", prompt: "" },
+        agentCtx("s-a", { agentId: "agent-a" }),
+      );
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "m", provider: "p", prompt: "" },
+        agentCtx("s-b", { agentId: "agent-b" }),
+      );
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        { toolName: "search", params: { q: "first" } },
+        toolCtx("s-a", { agentId: "agent-a" }),
+      );
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        { toolName: "search", params: { q: "second" } },
+        toolCtx("s-b", { agentId: "agent-b" }),
+      );
+
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        {
+          toolName: "search",
+          params: { q: "second" },
+          result: { ok: "b" },
+        },
+        toolCtx(undefined, { agentId: "agent-b" }),
+      );
+
+      expect(toolSpanA.update).not.toHaveBeenCalled();
+      expect(toolSpanA.end).not.toHaveBeenCalled();
+      expect(toolSpanB.update).toHaveBeenCalledWith({
+        input: { q: "second" },
+        metadata: { agentId: "agent-b" },
+        output: { ok: "b" },
+      });
+      expect(toolSpanB.end).toHaveBeenCalledTimes(1);
+      expect(ctx.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("using agentId fallback"),
       );
     });
   });
