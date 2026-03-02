@@ -77,10 +77,40 @@ export function createOpikService(
 ): OpenClawPluginService {
   let client: Opik | null = null;
   const activeTraces = new Map<string, ActiveTrace>();
+  const sessionByAgentId = new Map<string, string>();
   let cleanup: (() => void) | null = null;
   let spanSeq = 0;
   let lastActiveSessionKey: string | undefined;
   let warnedMissingAfterToolSessionKey = false;
+
+  function rememberSessionCorrelation(sessionKey: string, agentId?: unknown): void {
+    lastActiveSessionKey = sessionKey;
+    if (typeof agentId === "string" && agentId.length > 0) {
+      sessionByAgentId.set(agentId, sessionKey);
+    }
+  }
+
+  function forgetSessionCorrelation(sessionKey: string): void {
+    if (lastActiveSessionKey === sessionKey) {
+      lastActiveSessionKey = undefined;
+    }
+    for (const [agentId, mappedSessionKey] of sessionByAgentId) {
+      if (mappedSessionKey === sessionKey) {
+        sessionByAgentId.delete(agentId);
+      }
+    }
+  }
+
+  function warnMissingAfterToolSessionKey(
+    logger: { warn: (message: string) => void },
+    fallbackMode: string,
+  ): void {
+    if (warnedMissingAfterToolSessionKey) return;
+    warnedMissingAfterToolSessionKey = true;
+    logger.warn(
+      `opik: after_tool_call missing sessionKey; using ${fallbackMode} fallback correlation (upgrade OpenClaw for strict context propagation)`,
+    );
+  }
 
   /** Consolidate output + metadata into a single trace.update() + trace.end(). */
   function finalizeTrace(sessionKey: string): void {
@@ -141,6 +171,7 @@ export function createOpikService(
 
     active.trace.end();
     activeTraces.delete(sessionKey);
+    forgetSessionCorrelation(sessionKey);
     client?.flush().catch(() => undefined);
   }
 
@@ -174,13 +205,14 @@ export function createOpikService(
         if (!client) return;
         const sessionKey = agentCtx.sessionKey;
         if (!sessionKey) return;
-        lastActiveSessionKey = sessionKey;
+        rememberSessionCorrelation(sessionKey, agentCtx.agentId);
 
         // Close any pre-existing trace for this session to avoid leaks
         const existing = activeTraces.get(sessionKey);
         if (existing) {
           closeActiveTrace(existing);
           activeTraces.delete(sessionKey);
+          forgetSessionCorrelation(sessionKey);
         }
 
         const trace = client.trace({
@@ -236,7 +268,7 @@ export function createOpikService(
         if (!client) return;
         const sessionKey = agentCtx.sessionKey;
         if (!sessionKey) return;
-        lastActiveSessionKey = sessionKey;
+        rememberSessionCorrelation(sessionKey, agentCtx.agentId);
 
         const active = activeTraces.get(sessionKey);
         if (!active?.llmSpan) return;
@@ -278,7 +310,7 @@ export function createOpikService(
         if (!client) return;
         const sessionKey = toolCtx.sessionKey;
         if (!sessionKey) return;
-        lastActiveSessionKey = sessionKey;
+        rememberSessionCorrelation(sessionKey, toolCtx.agentId);
 
         const active = activeTraces.get(sessionKey);
         if (!active) return;
@@ -302,21 +334,28 @@ export function createOpikService(
       api.on("after_tool_call", (event, toolCtx) => {
         if (!client) return;
         let sessionKey = toolCtx.sessionKey;
+        let fallbackMode: "agentId" | "single active trace" | "last active session" | undefined;
         if (!sessionKey) {
-          if (activeTraces.size === 1) {
-            sessionKey = activeTraces.keys().next().value as string | undefined;
-          } else if (lastActiveSessionKey && activeTraces.has(lastActiveSessionKey)) {
-            sessionKey = lastActiveSessionKey;
+          if (typeof toolCtx.agentId === "string" && toolCtx.agentId.length > 0) {
+            const byAgentId = sessionByAgentId.get(toolCtx.agentId);
+            if (byAgentId && activeTraces.has(byAgentId)) {
+              sessionKey = byAgentId;
+              fallbackMode = "agentId";
+            }
           }
-          if (sessionKey && !warnedMissingAfterToolSessionKey) {
-            warnedMissingAfterToolSessionKey = true;
-            ctx.logger.warn(
-              "opik: after_tool_call missing sessionKey; using fallback correlation (concurrent sessions may mismatch tool spans)",
-            );
+          if (!sessionKey && activeTraces.size === 1) {
+            sessionKey = activeTraces.keys().next().value as string | undefined;
+            fallbackMode = "single active trace";
+          } else if (!sessionKey && lastActiveSessionKey && activeTraces.has(lastActiveSessionKey)) {
+            sessionKey = lastActiveSessionKey;
+            fallbackMode = "last active session";
+          }
+          if (sessionKey && fallbackMode) {
+            warnMissingAfterToolSessionKey(ctx.logger, fallbackMode);
           }
         }
         if (!sessionKey) return;
-        lastActiveSessionKey = sessionKey;
+        rememberSessionCorrelation(sessionKey, toolCtx.agentId);
 
         const active = activeTraces.get(sessionKey);
         if (!active) return;
@@ -335,21 +374,34 @@ export function createOpikService(
         }
         if (!matchedKey || !matchedSpan) return;
 
+        const spanUpdate: Record<string, unknown> = {};
+        if (event.params && typeof event.params === "object" && !Array.isArray(event.params)) {
+          spanUpdate.input = event.params;
+        }
+        if (event.durationMs !== undefined || toolCtx.agentId) {
+          spanUpdate.metadata = {
+            ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+            ...(toolCtx.agentId ? { agentId: toolCtx.agentId } : {}),
+          };
+        }
+
         if (event.error) {
-          matchedSpan.update({
-            output: { error: event.error },
-            errorInfo: {
-              exceptionType: "ToolError",
-              message: event.error,
-              traceback: event.error,
-            },
-          });
+          spanUpdate.output = { error: event.error };
+          spanUpdate.errorInfo = {
+            exceptionType: "ToolError",
+            message: event.error,
+            traceback: event.error,
+          };
         } else if (event.result !== undefined) {
           const output =
             typeof event.result === "object" && event.result !== null
               ? (event.result as Record<string, unknown>)
               : { result: event.result };
-          matchedSpan.update({ output });
+          spanUpdate.output = output;
+        }
+
+        if (Object.keys(spanUpdate).length > 0) {
+          matchedSpan.update(spanUpdate);
         }
 
         matchedSpan.end();
@@ -362,6 +414,7 @@ export function createOpikService(
       api.on("agent_end", (event, agentCtx) => {
         const sessionKey = agentCtx.sessionKey;
         if (!sessionKey) return;
+        rememberSessionCorrelation(sessionKey, agentCtx.agentId);
 
         const active = activeTraces.get(sessionKey);
         if (!active) return;
@@ -452,6 +505,7 @@ export function createOpikService(
               /* ignore */
             }
             activeTraces.delete(key);
+            forgetSessionCorrelation(key);
           }
         }
 
@@ -481,6 +535,8 @@ export function createOpikService(
         closeActiveTrace(active);
       }
       activeTraces.clear();
+      sessionByAgentId.clear();
+      lastActiveSessionKey = undefined;
 
       if (client) {
         await client.flush().catch(() => undefined);
