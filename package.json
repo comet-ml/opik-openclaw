@@ -24,7 +24,7 @@
     "@types/node": "^25.3.3",
     "openclaw": "^2026.3.1",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.0.18"
   },
   "files": [
     "index.ts",
