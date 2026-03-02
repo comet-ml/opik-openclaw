@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a reproducible problem with the OpenClaw Opik plugin.
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Clear and concise description of the bug.
+      placeholder: The plugin fails to export traces when...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps and commands to reproduce.
+      placeholder: |
+        1. Configure plugin using `openclaw opik configure`
+        2. Start gateway `openclaw gateway run`
+        3. Send message `openclaw message send "hello"`
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: Traces should appear in Opik project ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: No traces appear and logs show ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Provide versions and runtime details.
+      placeholder: |
+        - openclaw version:
+        - plugin version:
+        - node version:
+        - OS:
+        - deployment (local/remote gateway):
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste sanitized logs or stack traces.
+      render: shell

@@ -1,0 +1,12 @@
+# Default ownership for this repository
+* @comet-ml/comet-opik-devs
+
+# Documentation and templates
+*.md @comet-ml/comet-opik-devs
+.github/ISSUE_TEMPLATE/* @comet-ml/comet-opik-devs
+.github/pull_request_template.md @comet-ml/comet-opik-devs
+
+# CI and automation
+.github/workflows/* @comet-ml/comet-devops @comet-ml/comet-opik-devs
+.github/dependabot.yml @comet-ml/comet-devops @comet-ml/comet-opik-devs
+.github/labeler.yml @comet-ml/comet-opik-devs

@@ -1,0 +1,49 @@
+{
+  "id": "opik",
+  "name": "Opik",
+  "description": "Export OpenClaw LLM traces to Opik",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": { "type": "boolean" },
+      "apiKey": { "type": "string" },
+      "apiUrl": { "type": "string" },
+      "projectName": { "type": "string" },
+      "workspaceName": { "type": "string" },
+      "tags": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  },
+  "uiHints": {
+    "enabled": {
+      "label": "Tracing Enabled",
+      "help": "Enable Opik trace export while the plugin is loaded."
+    },
+    "apiKey": {
+      "label": "Opik API Key",
+      "placeholder": "your-api-key",
+      "sensitive": true,
+      "help": "Optional for local deployments; defaults to OPIK_API_KEY."
+    },
+    "apiUrl": {
+      "label": "Opik API URL",
+      "placeholder": "https://www.comet.com/opik/api",
+      "help": "Defaults to OPIK_URL_OVERRIDE when not set."
+    },
+    "projectName": {
+      "label": "Project Name",
+      "placeholder": "openclaw"
+    },
+    "workspaceName": {
+      "label": "Workspace Name",
+      "placeholder": "default"
+    },
+    "tags": {
+      "label": "Default Tags",
+      "help": "List of tags applied to every created trace."
+    }
+  }
+}

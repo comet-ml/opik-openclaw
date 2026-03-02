@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest an enhancement for the OpenClaw Opik plugin.
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the user pain point or gap.
+      placeholder: I want to ... because ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you want.
+      placeholder: Add support for ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include any workarounds or alternatives evaluated.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links to related issues/PRs, logs, or docs.

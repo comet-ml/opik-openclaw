@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Opik documentation
+    url: https://www.comet.com/docs/opik
+    about: Check Opik setup and integration documentation.
+  - name: OpenClaw plugins documentation
+    url: https://docs.openclaw.ai/plugins/community
+    about: Review community plugin packaging and installation docs.

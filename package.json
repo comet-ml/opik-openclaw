@@ -1,0 +1,39 @@
+{
+  "name": "@comet-ml/openclaw-opik",
+  "version": "2026.2.16",
+  "description": "OpenClaw Opik exporter — sends LLM traces to Opik",
+  "type": "module",
+  "scripts": {
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "smoke": "vitest run src/plugin.smoke.test.ts"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.0.1",
+    "opik": "^1.10.22"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "openclaw": "^2026.3.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "files": [
+    "index.ts",
+    "src/configure.ts",
+    "src/service.ts",
+    "src/types.ts",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

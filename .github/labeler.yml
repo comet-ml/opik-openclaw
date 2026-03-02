@@ -1,0 +1,30 @@
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'package.json'
+      - 'package-lock.json'
+
+infrastructure:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/**/*'
+      - '.eslintrc.json'
+      - '.prettierrc'
+      - 'tsconfig.json'
+
+documentation:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - '**/*.md'
+
+typescript:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.ts'
+
+tests:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.test.ts'
