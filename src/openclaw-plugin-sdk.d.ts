@@ -26,10 +26,11 @@ declare module "openclaw/plugin-sdk" {
     start: (ctx: {
       config: unknown;
       logger: {
+        info: (message: string) => void;
         warn: (message: string) => void;
       };
     }) => void | Promise<void>;
-    stop?: () => void | Promise<void>;
+    stop?: (ctx?: unknown) => void | Promise<void>;
   };
 
   export type OpenClawPluginApi = {
