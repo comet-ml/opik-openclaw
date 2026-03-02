@@ -1,5 +1,5 @@
 {
-  "name": "@opik/openclaw-opik",
+  "name": "@opik/opik-openclaw",
   "version": "0.1.1",
   "description": "OpenClaw Opik exporter — sends LLM traces to Opik",
   "type": "module",
