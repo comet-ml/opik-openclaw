@@ -17,7 +17,7 @@ const OPIK_CLOUD_HOST = "https://www.comet.com/";
 const DEFAULT_LOCAL_URL = "http://localhost:5173/";
 /** Max URL validation retries (matches SDK's MAX_URL_VALIDATION_RETRIES). */
 const MAX_URL_RETRIES = 3;
-const OPIK_PLUGIN_ID = "opik";
+const OPIK_PLUGIN_ID = "opik-openclaw";
 
 function asObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

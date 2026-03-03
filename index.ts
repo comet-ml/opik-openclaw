@@ -9,7 +9,7 @@ import { parseOpikPluginConfig } from "./src/types.js";
 disableLogger();
 
 const plugin = {
-  id: "opik",
+  id: "opik-openclaw",
   name: "Opik",
   description: "Export LLM traces and spans to Opik for observability",
   configSchema: emptyPluginConfigSchema(),

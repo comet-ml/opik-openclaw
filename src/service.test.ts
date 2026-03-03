@@ -100,9 +100,7 @@ function createServiceContext(
   opikCfg: OpikCfg = { enabled: true, apiKey: "test-key" },
 ) {
   return {
-    config: {
-      opik: opikEnabled ? opikCfg : { ...opikCfg, enabled: false },
-    },
+    config: opikEnabled ? opikCfg : { ...opikCfg, enabled: false },
     logger: createLogger(),
     stateDir: "/tmp/opik-test",
   };
@@ -178,7 +176,7 @@ describe("opik service", () => {
       });
     });
 
-    test("prefers pluginConfig over legacy top-level config", async () => {
+    test("prefers pluginConfig over runtime service config", async () => {
       const { api } = createApi();
       const service = createOpikService(api as any, {
         enabled: true,
@@ -191,10 +189,10 @@ describe("opik service", () => {
       await service.start(
         createServiceContext(true, {
           enabled: false,
-          apiKey: "legacy-key",
-          apiUrl: "https://legacy-opik.example.com",
-          projectName: "legacy-project",
-          workspaceName: "legacy-workspace",
+          apiKey: "runtime-key",
+          apiUrl: "https://runtime-opik.example.com",
+          projectName: "runtime-project",
+          workspaceName: "runtime-workspace",
         }) as any,
       );
 

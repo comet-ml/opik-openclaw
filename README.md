@@ -43,7 +43,7 @@ The plugin runs inside the OpenClaw Gateway process. If your gateway is remote, 
 openclaw opik configure
 ```
 
-The setup wizard validates endpoint and credentials, then writes config under `plugins.entries.opik`.
+The setup wizard validates endpoint and credentials, then writes config under `plugins.entries.opik-openclaw`.
 
 ### 2. Check effective settings
 
@@ -68,7 +68,7 @@ Then confirm traces in your Opik project.
 {
   "plugins": {
     "entries": {
-      "opik": {
+      "opik-openclaw": {
         "enabled": true,
         "config": {
           "enabled": true,
@@ -85,6 +85,18 @@ Then confirm traces in your Opik project.
         }
       }
     }
+  }
+}
+```
+
+### Plugin trust allowlist
+
+OpenClaw warns when `plugins.allow` is empty and a community plugin is discovered. Pin trusted plugins explicitly:
+
+```json
+{
+  "plugins": {
+    "allow": ["opik-openclaw"]
   }
 }
 ```

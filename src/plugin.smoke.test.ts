@@ -33,7 +33,7 @@ describe("plugin smoke", () => {
     } as any);
 
     expect(registerService).toHaveBeenCalledTimes(1);
-    expect(registerService.mock.calls[0]?.[0]?.id).toBe("opik");
+    expect(registerService.mock.calls[0]?.[0]?.id).toBe("opik-openclaw");
 
     expect(registerCli).toHaveBeenCalledTimes(1);
     expect(registerCli.mock.calls[0]?.[1]).toEqual({ commands: ["opik"] });
@@ -53,7 +53,7 @@ describe("plugin smoke", () => {
     const manifestPath = new URL("../openclaw.plugin.json", import.meta.url);
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 
-    expect(manifest.id).toBe("opik");
+    expect(manifest.id).toBe("opik-openclaw");
     expect(manifest.configSchema?.properties?.apiKey?.type).toBe("string");
     expect(manifest.configSchema?.properties?.projectName?.type).toBe("string");
     expect(manifest.uiHints?.apiKey?.sensitive).toBe(true);

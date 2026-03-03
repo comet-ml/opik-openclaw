@@ -8,7 +8,7 @@ import {
 } from "./configure.js";
 
 describe("configure helpers", () => {
-  test("setOpikPluginEntry writes plugins.entries.opik", () => {
+  test("setOpikPluginEntry writes plugins.entries.opik-openclaw", () => {
     const next = setOpikPluginEntry(
       {} as any,
       {
@@ -22,8 +22,8 @@ describe("configure helpers", () => {
       true,
     ) as any;
 
-    expect(next.plugins.entries.opik.enabled).toBe(true);
-    expect(next.plugins.entries.opik.config).toEqual({
+    expect(next.plugins.entries["opik-openclaw"].enabled).toBe(true);
+    expect(next.plugins.entries["opik-openclaw"].config).toEqual({
       enabled: true,
       apiKey: "test-key",
       apiUrl: "https://opik.example.com",
@@ -33,11 +33,11 @@ describe("configure helpers", () => {
     });
   });
 
-  test("getOpikPluginEntry reads plugin-scoped config", () => {
+  test("getOpikPluginEntry reads canonical plugin-scoped config", () => {
     const parsed = getOpikPluginEntry({
       plugins: {
         entries: {
-          opik: {
+          "opik-openclaw": {
             enabled: false,
             config: {
               projectName: "project-x",
@@ -59,7 +59,7 @@ describe("opik status command", () => {
       ({
         plugins: {
           entries: {
-            opik: {
+            "opik-openclaw": {
               enabled: true,
               config: {
                 enabled: true,
@@ -100,7 +100,7 @@ describe("opik status command", () => {
         ({
           plugins: {
             entries: {
-              opik: {
+              "opik-openclaw": {
                 enabled: true,
                 config: {
                   enabled: true,

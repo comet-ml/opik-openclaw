@@ -26,11 +26,25 @@ const DEFAULT_STALE_SWEEP_INTERVAL_MS = 60 * 1000;
 const DEFAULT_FLUSH_RETRY_COUNT = 2;
 const DEFAULT_FLUSH_RETRY_BASE_DELAY_MS = 250;
 const MAX_FLUSH_RETRY_DELAY_MS = 5000;
+const OPIK_PLUGIN_ID = "opik-openclaw";
 
 type ServiceLogger = {
   info: (message: string) => void;
   warn: (message: string) => void;
 };
+
+function mergeDefinedConfig(
+  base: OpikPluginConfig,
+  override: OpikPluginConfig,
+): OpikPluginConfig {
+  const merged: OpikPluginConfig = { ...base };
+  const mutable = merged as Record<string, unknown>;
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) continue;
+    mutable[key] = value;
+  }
+  return merged;
+}
 
 function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -100,14 +114,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-function readLegacyOpikConfig(config: unknown): OpikPluginConfig {
-  if (!config || typeof config !== "object" || Array.isArray(config)) {
-    return {};
-  }
-  const root = config as Record<string, unknown>;
-  return parseOpikPluginConfig(root.opik);
 }
 
 export function createOpikService(
@@ -367,15 +373,15 @@ export function createOpikService(
   }
 
   return {
-    id: "opik",
+    id: OPIK_PLUGIN_ID,
     async start(ctx) {
       log = {
         info: ctx.logger.info.bind(ctx.logger),
         warn: ctx.logger.warn.bind(ctx.logger),
       };
 
-      const legacyCfg = readLegacyOpikConfig(ctx.config);
-      const opikCfg: OpikPluginConfig = { ...legacyCfg, ...pluginConfig };
+      const runtimeCfg = parseOpikPluginConfig(ctx.config);
+      const opikCfg = mergeDefinedConfig(runtimeCfg, pluginConfig);
 
       if (!opikCfg?.enabled) {
         return;
