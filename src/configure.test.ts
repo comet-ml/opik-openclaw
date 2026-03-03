@@ -31,35 +31,6 @@ describe("configure helpers", () => {
       workspaceName: "test-workspace",
       tags: ["tag-a", "tag-b"],
     });
-    expect(next.plugins.entries.opik).toBeUndefined();
-  });
-
-  test("setOpikPluginEntry migrates legacy plugins.entries.opik", () => {
-    const next = setOpikPluginEntry(
-      {
-        plugins: {
-          entries: {
-            opik: {
-              enabled: false,
-              config: {
-                projectName: "legacy",
-              },
-            },
-          },
-        },
-      } as any,
-      { workspaceName: "default" },
-      true,
-    ) as any;
-
-    expect(next.plugins.entries.opik).toBeUndefined();
-    expect(next.plugins.entries["opik-openclaw"]).toEqual({
-      enabled: true,
-      config: {
-        projectName: "legacy",
-        workspaceName: "default",
-      },
-    });
   });
 
   test("getOpikPluginEntry reads canonical plugin-scoped config", () => {
@@ -67,24 +38,6 @@ describe("configure helpers", () => {
       plugins: {
         entries: {
           "opik-openclaw": {
-            enabled: false,
-            config: {
-              projectName: "project-x",
-            },
-          },
-        },
-      },
-    } as any);
-
-    expect(parsed.enabled).toBe(false);
-    expect(parsed.config.projectName).toBe("project-x");
-  });
-
-  test("getOpikPluginEntry falls back to legacy plugin-scoped config", () => {
-    const parsed = getOpikPluginEntry({
-      plugins: {
-        entries: {
-          opik: {
             enabled: false,
             config: {
               projectName: "project-x",
