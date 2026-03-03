@@ -48,6 +48,8 @@ describeMaybe("opik service e2e", () => {
           messageProvider: "test",
           sessionId: `session-${randomUUID()}`,
           runId,
+          channelId: "discord",
+          trigger: "cron",
         },
       );
 
@@ -155,6 +157,8 @@ describeMaybe("opik service e2e", () => {
           sessionKey,
           agentId: "agent-e2e",
           runId,
+          channelId: "discord",
+          trigger: "cron",
         },
       );
 
@@ -169,6 +173,8 @@ describeMaybe("opik service e2e", () => {
           sessionKey,
           agentId: "agent-e2e",
           runId,
+          channelId: "discord",
+          trigger: "cron",
         },
       );
 
