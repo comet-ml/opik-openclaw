@@ -18,14 +18,6 @@ const DEFAULT_LOCAL_URL = "http://localhost:5173/";
 /** Max URL validation retries (matches SDK's MAX_URL_VALIDATION_RETRIES). */
 const MAX_URL_RETRIES = 3;
 const OPIK_PLUGIN_ID = "opik-openclaw";
-const OPIK_LEGACY_PLUGIN_ID = "opik";
-
-function hasPluginEntry(entry: Record<string, unknown>): boolean {
-  if (typeof entry.enabled === "boolean") {
-    return true;
-  }
-  return Object.keys(asObject(entry.config)).length > 0 || Object.keys(entry).length > 0;
-}
 
 function asObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -41,9 +33,7 @@ export function getOpikPluginEntry(cfg: OpenClawConfig): {
   const root = asObject(cfg);
   const plugins = asObject(root.plugins);
   const entries = asObject(plugins.entries);
-  const canonical = asObject(entries[OPIK_PLUGIN_ID]);
-  const legacy = asObject(entries[OPIK_LEGACY_PLUGIN_ID]);
-  const entry = hasPluginEntry(canonical) ? canonical : legacy;
+  const entry = asObject(entries[OPIK_PLUGIN_ID]);
   const config = asObject(entry.config);
   return {
     enabled: typeof entry.enabled === "boolean" ? entry.enabled : undefined,
@@ -59,13 +49,9 @@ export function setOpikPluginEntry(
   const root = asObject(cfg);
   const plugins = asObject(root.plugins);
   const entries = asObject(plugins.entries);
-  const canonicalEntry = asObject(entries[OPIK_PLUGIN_ID]);
-  const legacyEntry = asObject(entries[OPIK_LEGACY_PLUGIN_ID]);
-  const existingEntry = hasPluginEntry(canonicalEntry) ? canonicalEntry : legacyEntry;
-  const sanitizedEntries = { ...entries };
-  delete sanitizedEntries[OPIK_LEGACY_PLUGIN_ID];
+  const existingEntry = asObject(entries[OPIK_PLUGIN_ID]);
   const nextEntries = {
-    ...sanitizedEntries,
+    ...entries,
     [OPIK_PLUGIN_ID]: {
       ...existingEntry,
       enabled,
