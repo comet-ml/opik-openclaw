@@ -75,7 +75,12 @@ Then confirm traces in your Opik project.
           "apiUrl": "https://www.comet.com/opik/api",
           "projectName": "openclaw",
           "workspaceName": "default",
-          "tags": ["openclaw"]
+          "tags": ["openclaw"],
+          "staleTraceCleanupEnabled": true,
+          "staleTraceTimeoutMs": 300000,
+          "staleSweepIntervalMs": 60000,
+          "flushRetryCount": 2,
+          "flushRetryBaseDelayMs": 250
         }
       }
     }
@@ -105,6 +110,9 @@ Then confirm traces in your Opik project.
 | `llm_output` | llm span update/end | writes usage/output and closes span |
 | `before_tool_call` | tool span start | captures tool name + input |
 | `after_tool_call` | tool span update/end | captures output/error + duration |
+| `subagent_spawning` | subagent span start | starts subagent lifecycle span on requester trace |
+| `subagent_spawned` | subagent span update | enriches subagent span with run metadata |
+| `subagent_ended` | subagent span update/end | finalizes subagent span with outcome/error |
 | `agent_end` | trace finalize | closes pending spans and trace |
 
 ## Known limitation
