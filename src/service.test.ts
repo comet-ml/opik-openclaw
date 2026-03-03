@@ -294,6 +294,33 @@ describe("opik service", () => {
       );
     });
 
+    test("prefers channelId and records trigger metadata when provided", async () => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "gpt-4", provider: "openai", prompt: "Hello" },
+        agentCtx("session-1", { channelId: "discord", trigger: "cron" }),
+      );
+
+      expect(mockTraceFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "gpt-4 \u00b7 discord",
+          metadata: expect.objectContaining({
+            channel: "discord",
+            channelId: "discord",
+            trigger: "cron",
+          }),
+        }),
+      );
+    });
+
     test("uses custom tags from config", async () => {
       const { api, hooks } = createApi();
       const service = createOpikService(api as any);
@@ -388,7 +415,7 @@ describe("opik service", () => {
         hooks,
         "llm_input",
         { model: "gpt-4", provider: "openai", prompt: "hi" },
-        agentCtx("s1"),
+        agentCtx("s1", { channelId: "discord", trigger: "cron" }),
       );
 
       invokeHook(
@@ -435,7 +462,7 @@ describe("opik service", () => {
         hooks,
         "llm_input",
         { model: "gpt-4", provider: "openai", prompt: "hi" },
-        agentCtx("s1"),
+        agentCtx("s1", { channelId: "discord", trigger: "cron" }),
       );
 
       invokeHook(
@@ -1183,7 +1210,7 @@ describe("opik service", () => {
         hooks,
         "llm_input",
         { model: "gpt-4", provider: "openai", prompt: "hi" },
-        agentCtx("s1"),
+        agentCtx("s1", { channelId: "discord", trigger: "cron" }),
       );
 
       invokeHook(
@@ -1215,6 +1242,9 @@ describe("opik service", () => {
 
       expect(metadata.model).toBe("gpt-4");
       expect(metadata.provider).toBe("openai");
+      expect(metadata.channel).toBe("discord");
+      expect(metadata.channelId).toBe("discord");
+      expect(metadata.trigger).toBe("cron");
       expect(metadata.usage).toEqual({
         input: 100,
         output: 50,
