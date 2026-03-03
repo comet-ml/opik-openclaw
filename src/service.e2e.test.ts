@@ -198,7 +198,7 @@ function createApi() {
 
 function createServiceContext() {
   return {
-    config: { opik: { enabled: true } },
+    config: { enabled: true },
     logger: {
       info: () => undefined,
       warn: () => undefined,
