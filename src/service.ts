@@ -36,6 +36,14 @@ function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function resolveChannelId(ctx: Record<string, unknown>): string | undefined {
+  return asNonEmptyString(ctx.channelId) ?? asNonEmptyString(ctx.messageProvider);
+}
+
+function resolveTrigger(ctx: Record<string, unknown>): string | undefined {
+  return asNonEmptyString(ctx.trigger);
+}
+
 function asNonNegativeNumber(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return undefined;
@@ -141,6 +149,18 @@ export function createOpikService(
     if (typeof agentId === "string" && agentId.length > 0) {
       sessionByAgentId.set(agentId, sessionKey);
     }
+  }
+
+  function applyContextMeta(active: ActiveTrace, ctx: Record<string, unknown>): void {
+    const explicitChannelId = asNonEmptyString(ctx.channelId);
+    const fallbackChannel = asNonEmptyString(ctx.messageProvider);
+    if (explicitChannelId) {
+      active.channelId = explicitChannelId;
+    } else if (!active.channelId && fallbackChannel) {
+      active.channelId = fallbackChannel;
+    }
+    const trigger = resolveTrigger(ctx);
+    if (trigger) active.trigger = trigger;
   }
 
   function forgetSessionCorrelation(sessionKey: string): void {
@@ -303,6 +323,8 @@ export function createOpikService(
       durationMs: agentEnd?.durationMs,
       model: active.model ?? active.costMeta.model,
       provider: active.provider ?? active.costMeta.provider,
+      ...(active.channelId ? { channel: active.channelId, channelId: active.channelId } : {}),
+      ...(active.trigger ? { trigger: active.trigger } : {}),
     };
 
     // Prefer accumulated llm_output usage, fall back to diagnostic costMeta usage.
@@ -395,6 +417,9 @@ export function createOpikService(
         const sessionKey = agentCtx.sessionKey;
         if (!sessionKey) return;
         rememberSessionCorrelation(sessionKey, agentCtx.agentId);
+        const agentCtxObj = agentCtx as Record<string, unknown>;
+        const channelId = resolveChannelId(agentCtxObj);
+        const trigger = resolveTrigger(agentCtxObj);
 
         // Close any pre-existing trace for this session to avoid leaks.
         const existing = activeTraces.get(sessionKey);
@@ -407,7 +432,7 @@ export function createOpikService(
         let trace: Trace;
         try {
           trace = client.trace({
-            name: `${event.model} · ${agentCtx.messageProvider ?? "unknown"}`,
+            name: `${event.model} · ${channelId ?? "unknown"}`,
             threadId: sessionKey,
             input: {
               prompt: event.prompt,
@@ -420,7 +445,8 @@ export function createOpikService(
               sessionId: event.sessionId,
               runId: event.runId,
               agentId: agentCtx.agentId,
-              channel: agentCtx.messageProvider,
+              ...(channelId ? { channel: channelId, channelId } : {}),
+              ...(trigger ? { trigger } : {}),
             },
             tags: tags.length > 0 ? tags : undefined,
           });
@@ -459,6 +485,8 @@ export function createOpikService(
           usage: {},
           model: event.model,
           provider: event.provider,
+          channelId,
+          trigger,
         });
       });
 
@@ -474,6 +502,7 @@ export function createOpikService(
         const active = activeTraces.get(sessionKey);
         if (!active?.llmSpan) return;
 
+        applyContextMeta(active, agentCtx as Record<string, unknown>);
         active.lastActivityAt = Date.now();
 
         // Trace output uses joined text for readability; LLM span retains raw array for debugging.
@@ -869,6 +898,7 @@ export function createOpikService(
         const active = activeTraces.get(sessionKey);
         if (!active) return;
 
+        applyContextMeta(active, agentCtx as Record<string, unknown>);
         // Close any orphaned tool/subagent spans synchronously.
         for (const [toolKey, toolSpan] of active.toolSpans) {
           safeSpanEnd(toolSpan, `agent_end orphan tool sessionKey=${sessionKey} toolKey=${toolKey}`);
