@@ -65,6 +65,47 @@ function asNonNegativeNumber(value: unknown): number | undefined {
   return value;
 }
 
+const MEDIA_IMAGE_REFERENCE_RE = /\bmedia:(?:https?:\/\/[^\s"'`]+|\.[/][^\s"'`]+|[/][^\s"'`]+|[^\s"'`]+)\.(?:jpe?g|png|webp|gif)(?=[\s"'`]|$)/gi;
+
+function sanitizeStringForOpik(value: string): string {
+  return value.replace(MEDIA_IMAGE_REFERENCE_RE, "media:<image-ref>");
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function sanitizeValueForOpik(value: unknown): unknown {
+  if (typeof value === "string") {
+    return sanitizeStringForOpik(value);
+  }
+
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((item) => {
+      const sanitized = sanitizeValueForOpik(item);
+      if (sanitized !== item) changed = true;
+      return sanitized;
+    });
+    return changed ? next : value;
+  }
+
+  if (isPlainObject(value)) {
+    let changed = false;
+    const next: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) {
+      const sanitized = sanitizeValueForOpik(child);
+      next[key] = sanitized;
+      if (sanitized !== child) changed = true;
+    }
+    return changed ? next : value;
+  }
+
+  return value;
+}
+
 function hasUsageFields(usage: ActiveTrace["usage"]): boolean {
   return (
     usage.input != null ||
@@ -437,14 +478,15 @@ export function createOpikService(
 
         let trace: Trace;
         try {
+          const sanitizedTraceInput = sanitizeValueForOpik({
+            prompt: event.prompt,
+            systemPrompt: event.systemPrompt,
+            imagesCount: event.imagesCount,
+          }) as Record<string, unknown>;
           trace = client.trace({
             name: `${event.model} · ${channelId ?? "unknown"}`,
             threadId: sessionKey,
-            input: {
-              prompt: event.prompt,
-              systemPrompt: event.systemPrompt,
-              imagesCount: event.imagesCount,
-            },
+            input: sanitizedTraceInput,
             metadata: {
               provider: event.provider,
               model: event.model,
@@ -463,17 +505,18 @@ export function createOpikService(
 
         let llmSpan: Span | null = null;
         try {
+          const sanitizedLlmInput = sanitizeValueForOpik({
+            prompt: event.prompt,
+            systemPrompt: event.systemPrompt,
+            historyMessages: event.historyMessages,
+            imagesCount: event.imagesCount,
+          }) as Record<string, unknown>;
           llmSpan = trace.span({
             name: event.model,
             type: "llm",
             model: event.model,
             provider: event.provider,
-            input: {
-              prompt: event.prompt,
-              systemPrompt: event.systemPrompt,
-              historyMessages: event.historyMessages,
-              imagesCount: event.imagesCount,
-            },
+            input: sanitizedLlmInput,
           });
         } catch (err) {
           log.warn(`opik: llm span creation failed (sessionKey=${sessionKey}): ${formatError(err)}`);
@@ -511,14 +554,19 @@ export function createOpikService(
         applyContextMeta(active, agentCtx as Record<string, unknown>);
         active.lastActivityAt = Date.now();
 
+        const sanitizedLlmOutput = sanitizeValueForOpik({
+          assistantTexts: event.assistantTexts,
+          lastAssistant: event.lastAssistant,
+        }) as { assistantTexts?: unknown; lastAssistant?: unknown };
+        const sanitizedAssistantTexts = Array.isArray(sanitizedLlmOutput.assistantTexts)
+          ? sanitizedLlmOutput.assistantTexts.filter((item): item is string => typeof item === "string")
+          : [];
+
         // Trace output uses joined text for readability; LLM span retains raw array for debugging.
         safeSpanUpdate(
           active.llmSpan,
           {
-            output: {
-              assistantTexts: event.assistantTexts,
-              lastAssistant: event.lastAssistant,
-            },
+            output: sanitizedLlmOutput as Record<string, unknown>,
             usage: mapUsageToOpikTokens(event.usage),
             model: event.model,
             provider: event.provider,
@@ -528,8 +576,8 @@ export function createOpikService(
 
         // Store output for deferred trace-level finalization.
         active.output = {
-          output: event.assistantTexts.join("\n\n"),
-          lastAssistant: event.lastAssistant,
+          output: sanitizedAssistantTexts.join("\n\n"),
+          lastAssistant: sanitizedLlmOutput.lastAssistant,
         };
 
         // Accumulate usage + model on the ActiveTrace for finalization metadata.
@@ -575,7 +623,7 @@ export function createOpikService(
           toolSpan = active.trace.span({
             name: event.toolName,
             type: "tool",
-            input: event.params,
+            input: sanitizeValueForOpik(event.params) as any,
             ...(Object.keys(spanMetadata).length > 0 ? { metadata: spanMetadata } : {}),
           });
         } catch (err) {
@@ -665,7 +713,7 @@ export function createOpikService(
 
         const spanUpdate: Record<string, unknown> = {};
         if (event.params && typeof event.params === "object" && !Array.isArray(event.params)) {
-          spanUpdate.input = event.params;
+          spanUpdate.input = sanitizeValueForOpik(event.params) as Record<string, unknown>;
         }
         const spanMetadata: Record<string, unknown> = {
           ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
@@ -679,18 +727,19 @@ export function createOpikService(
         }
 
         if (event.error) {
-          spanUpdate.output = { error: event.error };
+          const sanitizedError = sanitizeStringForOpik(event.error);
+          spanUpdate.output = { error: sanitizedError };
           spanUpdate.errorInfo = {
             exceptionType: "ToolError",
-            message: event.error,
-            traceback: event.error,
+            message: sanitizedError,
+            traceback: sanitizedError,
           };
         } else if (event.result !== undefined) {
           const output =
             typeof event.result === "object" && event.result !== null
               ? (event.result as Record<string, unknown>)
               : { result: event.result };
-          spanUpdate.output = output;
+          spanUpdate.output = sanitizeValueForOpik(output) as Record<string, unknown>;
         }
 
         if (Object.keys(spanUpdate).length > 0) {
@@ -873,11 +922,12 @@ export function createOpikService(
 
         const error = asNonEmptyString(eventObj.error);
         if (error) {
-          spanUpdate.output = { error };
+          const sanitizedError = sanitizeStringForOpik(error);
+          spanUpdate.output = { error: sanitizedError };
           spanUpdate.errorInfo = {
             exceptionType: "SubagentError",
-            message: error,
-            traceback: error,
+            message: sanitizedError,
+            traceback: sanitizedError,
           };
         }
 
@@ -922,9 +972,11 @@ export function createOpikService(
         // Store agent-end data for deferred finalization.
         active.agentEnd = {
           success: event.success,
-          error: event.error,
+          error: typeof event.error === "string" ? sanitizeStringForOpik(event.error) : event.error,
           durationMs: event.durationMs,
-          messages: ((event as Record<string, unknown>).messages as unknown[]) ?? [],
+          messages: (sanitizeValueForOpik(
+            ((event as Record<string, unknown>).messages as unknown[]) ?? [],
+          ) as unknown[]) ?? [],
         };
 
         // Defer finalization to a microtask so llm_output (which fires on the
