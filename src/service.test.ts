@@ -100,9 +100,7 @@ function createServiceContext(
   opikCfg: OpikCfg = { enabled: true, apiKey: "test-key" },
 ) {
   return {
-    config: {
-      opik: opikEnabled ? opikCfg : { ...opikCfg, enabled: false },
-    },
+    config: opikEnabled ? opikCfg : { ...opikCfg, enabled: false },
     logger: createLogger(),
     stateDir: "/tmp/opik-test",
   };
@@ -178,69 +176,7 @@ describe("opik service", () => {
       });
     });
 
-    test("reads canonical plugins.entries.opik-openclaw config", async () => {
-      const { api } = createApi();
-      const service = createOpikService(api as any);
-      await service.start({
-        config: {
-          plugins: {
-            entries: {
-              "opik-openclaw": {
-                enabled: true,
-                config: {
-                  apiKey: "entry-key",
-                  apiUrl: "https://entry-opik.example.com",
-                  projectName: "entry-project",
-                  workspaceName: "entry-workspace",
-                },
-              },
-            },
-          },
-        },
-        logger: createLogger(),
-        stateDir: "/tmp/opik-test",
-      } as any);
-
-      expect(mockOpikConstructor).toHaveBeenCalledWith({
-        apiKey: "entry-key",
-        apiUrl: "https://entry-opik.example.com",
-        projectName: "entry-project",
-        workspaceName: "entry-workspace",
-      });
-    });
-
-    test("falls back to legacy plugins.entries.opik config", async () => {
-      const { api } = createApi();
-      const service = createOpikService(api as any);
-      await service.start({
-        config: {
-          plugins: {
-            entries: {
-              opik: {
-                enabled: true,
-                config: {
-                  apiKey: "legacy-entry-key",
-                  apiUrl: "https://legacy-entry-opik.example.com",
-                  projectName: "legacy-entry-project",
-                  workspaceName: "legacy-entry-workspace",
-                },
-              },
-            },
-          },
-        },
-        logger: createLogger(),
-        stateDir: "/tmp/opik-test",
-      } as any);
-
-      expect(mockOpikConstructor).toHaveBeenCalledWith({
-        apiKey: "legacy-entry-key",
-        apiUrl: "https://legacy-entry-opik.example.com",
-        projectName: "legacy-entry-project",
-        workspaceName: "legacy-entry-workspace",
-      });
-    });
-
-    test("prefers pluginConfig over legacy top-level config", async () => {
+    test("prefers pluginConfig over runtime service config", async () => {
       const { api } = createApi();
       const service = createOpikService(api as any, {
         enabled: true,
@@ -253,10 +189,10 @@ describe("opik service", () => {
       await service.start(
         createServiceContext(true, {
           enabled: false,
-          apiKey: "legacy-key",
-          apiUrl: "https://legacy-opik.example.com",
-          projectName: "legacy-project",
-          workspaceName: "legacy-workspace",
+          apiKey: "runtime-key",
+          apiUrl: "https://runtime-opik.example.com",
+          projectName: "runtime-project",
+          workspaceName: "runtime-workspace",
         }) as any,
       );
 
