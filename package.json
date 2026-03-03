@@ -1,6 +1,6 @@
 {
   "name": "@opik/opik-openclaw",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "OpenClaw Opik exporter — sends LLM traces to Opik",
   "repository": {
     "type": "git",
@@ -34,6 +34,14 @@
     "index.ts",
     "src/configure.ts",
     "src/service.ts",
+    "src/service/constants.ts",
+    "src/service/helpers.ts",
+    "src/service/payload-sanitizer.ts",
+    "src/service/media.ts",
+    "src/service/attachment-uploader.ts",
+    "src/service/hooks/llm.ts",
+    "src/service/hooks/tool.ts",
+    "src/service/hooks/subagent.ts",
     "src/types.ts",
     "openclaw.plugin.json",
     "README.md",
