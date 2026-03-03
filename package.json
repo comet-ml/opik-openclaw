@@ -2,6 +2,10 @@
   "name": "@opik/opik-openclaw",
   "version": "0.1.6",
   "description": "OpenClaw Opik exporter — sends LLM traces to Opik",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/comet-ml/opik-openclaw"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.12.0",
