@@ -88,6 +88,11 @@ type OpikCfg = {
   projectName?: string;
   workspaceName?: string;
   tags?: string[];
+  staleTraceTimeoutMs?: number;
+  staleSweepIntervalMs?: number;
+  staleTraceCleanupEnabled?: boolean;
+  flushRetryCount?: number;
+  flushRetryBaseDelayMs?: number;
 };
 
 function createServiceContext(
@@ -219,16 +224,19 @@ describe("opik service", () => {
       });
     });
 
-    test("registers 5 hooks + 1 diagnostic listener on start", async () => {
+    test("registers lifecycle/tool/subagent hooks + 1 diagnostic listener on start", async () => {
       const { api } = createApi();
       const service = createOpikService(api as any);
       await service.start(createServiceContext() as any);
 
-      expect(api.on).toHaveBeenCalledTimes(5);
+      expect(api.on).toHaveBeenCalledTimes(8);
       expect(api.on).toHaveBeenCalledWith("llm_input", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("llm_output", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("before_tool_call", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("after_tool_call", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("subagent_spawning", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("subagent_spawned", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("subagent_ended", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
       expect(diagnosticListeners).toHaveLength(1);
     });
@@ -840,7 +848,94 @@ describe("opik service", () => {
   });
 
   // =========================================================================
-  // 6. agent_end hook
+  // 6. subagent hooks
+  // =========================================================================
+  describe("subagent hooks", () => {
+    test("records subagent lifecycle on the requester trace", async () => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockSubagentSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockSubagentSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "m", provider: "p", prompt: "" },
+        agentCtx("parent-session", { agentId: "parent-agent" }),
+      );
+
+      invokeHook(
+        hooks,
+        "subagent_spawning",
+        {
+          childSessionKey: "child-session",
+          agentId: "writer",
+          mode: "run",
+          threadRequested: true,
+        },
+        { requesterSessionKey: "parent-session", childSessionKey: "child-session", runId: "run-sub-1" },
+      );
+
+      invokeHook(
+        hooks,
+        "subagent_spawned",
+        {
+          childSessionKey: "child-session",
+          agentId: "writer",
+          mode: "run",
+          threadRequested: true,
+          runId: "run-sub-1",
+        },
+        { requesterSessionKey: "parent-session", childSessionKey: "child-session", runId: "run-sub-1" },
+      );
+
+      invokeHook(
+        hooks,
+        "subagent_ended",
+        {
+          targetSessionKey: "child-session",
+          targetKind: "subagent",
+          reason: "completed",
+          outcome: "ok",
+        },
+        { requesterSessionKey: "parent-session", childSessionKey: "child-session", runId: "run-sub-1" },
+      );
+
+      expect(mockTrace.span).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "subagent:writer",
+          input: expect.objectContaining({ childSessionKey: "child-session" }),
+        }),
+      );
+      expect(mockSubagentSpan.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            status: "spawned",
+            childSessionKey: "child-session",
+            runId: "run-sub-1",
+          }),
+        }),
+      );
+      expect(mockSubagentSpan.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            status: "ended",
+            targetSessionKey: "child-session",
+            outcome: "ok",
+          }),
+        }),
+      );
+      expect(mockSubagentSpan.end).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // =========================================================================
+  // 7. agent_end hook
   // =========================================================================
   describe("agent_end hook", () => {
     test("closes orphaned spans, merges costMeta into metadata, ends trace, flushes", async () => {
@@ -895,7 +990,7 @@ describe("opik service", () => {
       );
 
       expect(mockTrace.end).toHaveBeenCalled();
-      expect(mockFlush).toHaveBeenCalled();
+      await vi.waitFor(() => expect(mockFlush).toHaveBeenCalled());
     });
 
     test("includes errorInfo when event has error", async () => {
@@ -1004,6 +1099,43 @@ describe("opik service", () => {
       });
     });
 
+    test("preserves total-only usage in final trace metadata", async () => {
+      const { api, hooks } = createApi();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockTrace = opikState.createMockTrace();
+      mockTrace.span.mockReturnValue(mockLlmSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "gpt-4", provider: "openai", prompt: "hi" },
+        agentCtx("s1"),
+      );
+
+      invokeHook(
+        hooks,
+        "llm_output",
+        {
+          model: "gpt-4",
+          provider: "openai",
+          assistantTexts: ["Hello!"],
+          usage: { total: 150 },
+        },
+        agentCtx("s1"),
+      );
+
+      invokeHook(hooks, "agent_end", { success: true, durationMs: 500 }, agentCtx("s1"));
+
+      await Promise.resolve();
+
+      const metadata = mockTrace.update.mock.calls[0][0].metadata as Record<string, unknown>;
+      expect(metadata.usage).toEqual(expect.objectContaining({ total: 150 }));
+    });
+
     test("no-ops without active trace", async () => {
       const { api, hooks } = createApi();
       const service = createOpikService(api as any);
@@ -1075,7 +1207,7 @@ describe("opik service", () => {
         }),
       );
       expect(mockTrace.end).toHaveBeenCalledTimes(1);
-      expect(mockFlush).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => expect(mockFlush).toHaveBeenCalledTimes(1));
     });
 
     test("agent_end without llm_output extracts output from messages", async () => {
@@ -1474,7 +1606,68 @@ describe("opik service", () => {
       vi.advanceTimersByTime(5 * 60 * 1000 + 60 * 1000);
 
       // After cleanup, flush should be called since activeTraces is now empty
-      expect(mockFlush).toHaveBeenCalled();
+      await vi.waitFor(() => expect(mockFlush).toHaveBeenCalled());
+
+      await service.stop?.({} as any);
+    });
+
+    test("can disable stale cleanup via config", async () => {
+      vi.useFakeTimers();
+
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(
+        createServiceContext(true, {
+          enabled: true,
+          apiKey: "test-key",
+          staleTraceCleanupEnabled: false,
+        }) as any,
+      );
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+
+      vi.advanceTimersByTime(15 * 60 * 1000);
+
+      const staleCalls = mockTrace.update.mock.calls.filter(
+        (c: unknown[]) =>
+          (c[0] as Record<string, unknown>)?.metadata &&
+          ((c[0] as Record<string, unknown>).metadata as Record<string, unknown>)?.staleCleanup,
+      );
+      expect(staleCalls).toHaveLength(0);
+
+      await service.stop?.({} as any);
+    });
+
+    test("uses configured stale timeout and sweep interval", async () => {
+      vi.useFakeTimers();
+
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(
+        createServiceContext(true, {
+          enabled: true,
+          apiKey: "test-key",
+          staleTraceTimeoutMs: 2_000,
+          staleSweepIntervalMs: 1_000,
+        }) as any,
+      );
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+
+      vi.advanceTimersByTime(3_100);
+
+      expect(mockTrace.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { staleCleanup: true },
+          errorInfo: expect.objectContaining({ exceptionType: "StaleTrace" }),
+        }),
+      );
 
       await service.stop?.({} as any);
     });
@@ -1513,6 +1706,36 @@ describe("opik service", () => {
       await service.stop?.({} as any);
 
       expect(diagnosticListeners).toHaveLength(0);
+    });
+
+    test("retries flush with backoff when finalize flush fails", async () => {
+      vi.useFakeTimers();
+
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      const ctx = createServiceContext(true, {
+        enabled: true,
+        apiKey: "test-key",
+        flushRetryCount: 1,
+        flushRetryBaseDelayMs: 10,
+      }) as any;
+      await service.start(ctx);
+
+      mockFlush.mockRejectedValueOnce(new Error("network error")).mockResolvedValueOnce(undefined);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+      invokeHook(hooks, "agent_end", { success: true, durationMs: 10 }, agentCtx("s1"));
+
+      await Promise.resolve();
+      await vi.waitFor(() => expect(mockFlush).toHaveBeenCalledTimes(1));
+
+      vi.advanceTimersByTime(10);
+      await Promise.resolve();
+      await vi.waitFor(() => expect(mockFlush).toHaveBeenCalledTimes(2));
+      expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining("flush failed"));
     });
 
     test("does not throw when flush rejects", async () => {
