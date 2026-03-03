@@ -1,3 +1,6 @@
+import { readFile, stat } from "node:fs/promises";
+import { basename, extname, isAbsolute, resolve } from "node:path";
+import { homedir } from "node:os";
 import type {
   DiagnosticEventPayload,
   OpenClawPluginApi,
@@ -27,6 +30,40 @@ const DEFAULT_FLUSH_RETRY_COUNT = 2;
 const DEFAULT_FLUSH_RETRY_BASE_DELAY_MS = 250;
 const MAX_FLUSH_RETRY_DELAY_MS = 5000;
 const OPIK_PLUGIN_ID = "opik-openclaw";
+const LOCAL_ATTACHMENT_UPLOAD_MAGIC_ID = "BEMinIO";
+const ATTACHMENT_UPLOAD_PART_SIZE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_ATTACHMENT_BASE_URL = "https://www.comet.com/opik/api";
+const MEDIA_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".bmp",
+  ".tif",
+  ".tiff",
+  ".heic",
+  ".heif",
+  ".svg",
+  ".mp3",
+  ".wav",
+  ".m4a",
+  ".aac",
+  ".ogg",
+  ".oga",
+  ".flac",
+  ".opus",
+  ".caf",
+  ".weba",
+  ".webm",
+  ".mp4",
+  ".mov",
+  ".mkv",
+]);
+const LOCAL_MEDIA_PATH_RE =
+  /(?:^|[\s|[(])((?:~\/|\/)[^|\]\n\r]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|mp3|wav|m4a|aac|ogg|oga|flac|opus|caf|weba|webm|mp4|mov|mkv))(?:\s*\([^)]+\))?/gi;
+const MEDIA_SCHEME_LOCAL_PATH_RE =
+  /\bmedia:((?:~\/|\/)[^\s"'`]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|mp3|wav|m4a|aac|ogg|oga|flac|opus|caf|weba|webm|mp4|mov|mkv))(?=[\s"'`]|$)/gi;
 
 type ServiceLogger = {
   info: (message: string) => void;
@@ -106,6 +143,109 @@ function sanitizeValueForOpik(value: unknown): unknown {
   return value;
 }
 
+function normalizeLocalMediaPath(candidate: string): string | undefined {
+  const trimmed = candidate.trim().replace(/[),.;:]+$/, "");
+  if (!trimmed) return undefined;
+
+  const expanded = trimmed.startsWith("~/") ? resolve(homedir(), trimmed.slice(2)) : trimmed;
+  const normalized = resolve(expanded);
+  if (!isAbsolute(normalized)) return undefined;
+
+  const extension = extname(normalized).toLowerCase();
+  if (!MEDIA_EXTENSIONS.has(extension)) return undefined;
+  return normalized;
+}
+
+function collectMediaPathsFromString(value: string, target: Set<string>): void {
+  for (const match of value.matchAll(LOCAL_MEDIA_PATH_RE)) {
+    const candidate = normalizeLocalMediaPath(match[1] ?? "");
+    if (candidate) target.add(candidate);
+  }
+  for (const match of value.matchAll(MEDIA_SCHEME_LOCAL_PATH_RE)) {
+    const candidate = normalizeLocalMediaPath(match[1] ?? "");
+    if (candidate) target.add(candidate);
+  }
+}
+
+function collectMediaPathsFromUnknown(value: unknown, target: Set<string>): void {
+  if (typeof value === "string") {
+    collectMediaPathsFromString(value, target);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectMediaPathsFromUnknown(item, target);
+    }
+    return;
+  }
+  if (isPlainObject(value)) {
+    for (const child of Object.values(value)) {
+      collectMediaPathsFromUnknown(child, target);
+    }
+  }
+}
+
+function guessMimeType(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    case ".bmp":
+      return "image/bmp";
+    case ".tif":
+    case ".tiff":
+      return "image/tiff";
+    case ".heic":
+      return "image/heic";
+    case ".heif":
+      return "image/heif";
+    case ".svg":
+      return "image/svg+xml";
+    case ".mp3":
+      return "audio/mpeg";
+    case ".wav":
+      return "audio/wav";
+    case ".m4a":
+      return "audio/mp4";
+    case ".aac":
+      return "audio/aac";
+    case ".ogg":
+    case ".oga":
+      return "audio/ogg";
+    case ".flac":
+      return "audio/flac";
+    case ".opus":
+      return "audio/opus";
+    case ".caf":
+      return "audio/x-caf";
+    case ".weba":
+      return "audio/webm";
+    case ".webm":
+      return "video/webm";
+    case ".mp4":
+      return "video/mp4";
+    case ".mov":
+      return "video/quicktime";
+    case ".mkv":
+      return "video/x-matroska";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function resolveEntityId(entity: unknown): string | undefined {
+  if (!entity || typeof entity !== "object") return undefined;
+  const maybeEntity = entity as { id?: unknown; data?: { id?: unknown } };
+  const id = maybeEntity.data?.id ?? maybeEntity.id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
 function hasUsageFields(usage: ActiveTrace["usage"]): boolean {
   return (
     usage.input != null ||
@@ -178,8 +318,11 @@ export function createOpikService(
   let staleTraceCleanupEnabled = true;
   let flushRetryCount = DEFAULT_FLUSH_RETRY_COUNT;
   let flushRetryBaseDelayMs = DEFAULT_FLUSH_RETRY_BASE_DELAY_MS;
+  let attachmentBaseUrl = DEFAULT_ATTACHMENT_BASE_URL;
 
   let flushQueue: Promise<void> = Promise.resolve();
+  let attachmentQueue: Promise<void> = Promise.resolve();
+  const uploadedAttachmentKeys = new Set<string>();
 
   const exporterMetrics = {
     traceUpdateErrors: 0,
@@ -344,6 +487,164 @@ export function createOpikService(
     flushQueue = flushQueue.then(() => flushWithRetry(reason)).catch(() => undefined);
   }
 
+  function scheduleAttachmentUpload(job: () => Promise<void>): void {
+    attachmentQueue = attachmentQueue.then(job).catch((err: unknown) => {
+      log.warn(`opik: attachment upload task failed: ${formatError(err)}`);
+    });
+  }
+
+  async function uploadFileAttachment(params: {
+    entityType: "trace" | "span";
+    entityId: string;
+    projectName: string;
+    filePath: string;
+    reason: string;
+  }): Promise<void> {
+    if (!client) return;
+
+    const existingKey = `${params.entityType}:${params.entityId}:${params.filePath}`;
+    if (uploadedAttachmentKeys.has(existingKey)) return;
+    uploadedAttachmentKeys.add(existingKey);
+
+    const currentClient = client as Opik & {
+      api?: {
+        attachments?: {
+          startMultiPartUpload: (request: {
+            fileName: string;
+            numOfFileParts: number;
+            mimeType?: string;
+            projectName?: string;
+            entityType: "trace" | "span";
+            entityId: string;
+            path: string;
+          }) => Promise<{ uploadId: string; preSignUrls: string[] }>;
+          completeMultiPartUpload: (request: {
+            fileName: string;
+            projectName?: string;
+            entityType: "trace" | "span";
+            entityId: string;
+            fileSize: number;
+            mimeType?: string;
+            uploadId: string;
+            uploadedFileParts: Array<{ eTag: string; partNumber: number }>;
+          }) => Promise<void>;
+        };
+      };
+    };
+    const attachmentsApi = currentClient.api?.attachments;
+    if (!attachmentsApi) return;
+
+    try {
+      const stats = await stat(params.filePath);
+      if (!stats.isFile() || stats.size <= 0) return;
+
+      const bytes = await readFile(params.filePath);
+      const totalSize = bytes.byteLength;
+      const mimeType = guessMimeType(params.filePath);
+      const fileName = basename(params.filePath) || "attachment.bin";
+      const partCount = Math.max(1, Math.ceil(totalSize / ATTACHMENT_UPLOAD_PART_SIZE_BYTES));
+      const pathBase64 = Buffer.from(attachmentBaseUrl, "utf8").toString("base64");
+
+      const started = await attachmentsApi.startMultiPartUpload({
+        fileName,
+        numOfFileParts: partCount,
+        mimeType,
+        projectName: params.projectName,
+        entityType: params.entityType,
+        entityId: params.entityId,
+        path: pathBase64,
+      });
+
+      const urls = started.preSignUrls ?? [];
+      if (urls.length === 0) return;
+
+      if (started.uploadId === LOCAL_ATTACHMENT_UPLOAD_MAGIC_ID) {
+        const localResponse = await fetch(urls[0], {
+          method: "PUT",
+          body: bytes,
+        });
+        if (!localResponse.ok) {
+          throw new Error(`local attachment upload failed status=${localResponse.status}`);
+        }
+        return;
+      }
+
+      if (urls.length < partCount) {
+        throw new Error(
+          `insufficient pre-signed URLs (got ${urls.length}, expected ${partCount})`,
+        );
+      }
+
+      const uploadedParts: Array<{ eTag: string; partNumber: number }> = [];
+      for (let partNumber = 1; partNumber <= partCount; partNumber++) {
+        const start = (partNumber - 1) * ATTACHMENT_UPLOAD_PART_SIZE_BYTES;
+        const end = Math.min(start + ATTACHMENT_UPLOAD_PART_SIZE_BYTES, totalSize);
+        const chunk = bytes.subarray(start, end);
+        const url = urls[partNumber - 1];
+
+        const partResponse = await fetch(url, {
+          method: "PUT",
+          body: chunk,
+        });
+        if (!partResponse.ok) {
+          throw new Error(
+            `attachment part upload failed status=${partResponse.status} part=${partNumber}/${partCount}`,
+          );
+        }
+
+        const eTag = partResponse.headers.get("etag") ??
+          partResponse.headers.get("ETag") ??
+          "";
+        uploadedParts.push({ eTag, partNumber });
+      }
+
+      await attachmentsApi.completeMultiPartUpload({
+        fileName,
+        projectName: params.projectName,
+        entityType: params.entityType,
+        entityId: params.entityId,
+        fileSize: totalSize,
+        mimeType,
+        uploadId: started.uploadId,
+        uploadedFileParts: uploadedParts,
+      });
+    } catch (err) {
+      uploadedAttachmentKeys.delete(existingKey);
+      log.warn(
+        `opik: attachment upload failed (${params.reason}, entity=${params.entityType}:${params.entityId}, path=${params.filePath}): ${formatError(err)}`,
+      );
+    }
+  }
+
+  function scheduleMediaAttachmentUploads(params: {
+    entityType: "trace" | "span";
+    entity: unknown;
+    projectName: string;
+    reason: string;
+    payloads: unknown[];
+  }): void {
+    const entityId = resolveEntityId(params.entity);
+    if (!entityId) return;
+
+    const mediaPaths = new Set<string>();
+    for (const payload of params.payloads) {
+      collectMediaPathsFromUnknown(payload, mediaPaths);
+    }
+    if (mediaPaths.size === 0) return;
+
+    for (const filePath of mediaPaths) {
+      scheduleAttachmentUpload(() =>
+        uploadFileAttachment({
+          entityType: params.entityType,
+          entityId,
+          projectName: params.projectName,
+          filePath,
+          reason: params.reason,
+        })
+      );
+    }
+  }
+
   /** Consolidate output + metadata into a single trace.update() + trace.end(). */
   function finalizeTrace(sessionKey: string): void {
     const active = activeTraces.get(sessionKey);
@@ -433,6 +734,7 @@ export function createOpikService(
       const projectName = opikCfg.projectName ?? process.env.OPIK_PROJECT_NAME ?? "openclaw";
       const workspaceName = opikCfg.workspaceName ?? process.env.OPIK_WORKSPACE ?? "default";
       const tags = opikCfg.tags ?? ["openclaw"];
+      attachmentBaseUrl = (apiUrl ?? DEFAULT_ATTACHMENT_BASE_URL).replace(/\/+$/, "");
 
       staleTraceCleanupEnabled = opikCfg.staleTraceCleanupEnabled !== false;
       staleTraceTimeoutMs = Math.max(
@@ -536,6 +838,14 @@ export function createOpikService(
           provider: event.provider,
           channelId,
           trigger,
+        });
+
+        scheduleMediaAttachmentUploads({
+          entityType: "trace",
+          entity: trace,
+          projectName,
+          reason: `llm_input sessionKey=${sessionKey}`,
+          payloads: [event.prompt, event.systemPrompt, event.historyMessages],
         });
       });
 
@@ -647,6 +957,14 @@ export function createOpikService(
           }
         }
         active.toolSpans.set(spanKey, toolSpan);
+
+        scheduleMediaAttachmentUploads({
+          entityType: "span",
+          entity: toolSpan,
+          projectName,
+          reason: `before_tool_call sessionKey=${sessionKey} tool=${event.toolName}`,
+          payloads: [event.params],
+        });
       });
 
       // =====================================================================
@@ -749,6 +1067,14 @@ export function createOpikService(
             `after_tool_call sessionKey=${sessionKey} tool=${event.toolName}`,
           );
         }
+
+        scheduleMediaAttachmentUploads({
+          entityType: "span",
+          entity: matchedSpan,
+          projectName,
+          reason: `after_tool_call sessionKey=${sessionKey} tool=${event.toolName}`,
+          payloads: [event.params, event.result, event.error],
+        });
 
         safeSpanEnd(
           matchedSpan,
@@ -979,6 +1305,14 @@ export function createOpikService(
           ) as unknown[]) ?? [],
         };
 
+        scheduleMediaAttachmentUploads({
+          entityType: "trace",
+          entity: active.trace,
+          projectName,
+          reason: `agent_end sessionKey=${sessionKey}`,
+          payloads: [event.error, (event as Record<string, unknown>).messages],
+        });
+
         // Defer finalization to a microtask so llm_output (which fires on the
         // same synchronous call stack) can store output/usage first.
         const traceRef = active.trace;
@@ -1088,6 +1422,7 @@ export function createOpikService(
 
       // Drain any already-scheduled flushes before the final flush.
       await flushQueue.catch(() => undefined);
+      await attachmentQueue.catch(() => undefined);
 
       if (client) {
         await flushWithRetry("service stop");
