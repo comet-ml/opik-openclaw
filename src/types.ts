@@ -7,6 +7,11 @@ export type OpikPluginConfig = {
   projectName?: string;
   workspaceName?: string;
   tags?: string[];
+  staleTraceTimeoutMs?: number;
+  staleSweepIntervalMs?: number;
+  staleTraceCleanupEnabled?: boolean;
+  flushRetryCount?: number;
+  flushRetryBaseDelayMs?: number;
 };
 
 function asObject(value: unknown): Record<string, unknown> {
@@ -18,6 +23,13 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function asOptionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function asOptionalNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return value;
 }
 
 export function parseOpikPluginConfig(raw: unknown): OpikPluginConfig {
@@ -34,6 +46,12 @@ export function parseOpikPluginConfig(raw: unknown): OpikPluginConfig {
     projectName: asOptionalString(cfg.projectName),
     workspaceName: asOptionalString(cfg.workspaceName),
     tags,
+    staleTraceTimeoutMs: asOptionalNumber(cfg.staleTraceTimeoutMs),
+    staleSweepIntervalMs: asOptionalNumber(cfg.staleSweepIntervalMs),
+    staleTraceCleanupEnabled:
+      typeof cfg.staleTraceCleanupEnabled === "boolean" ? cfg.staleTraceCleanupEnabled : undefined,
+    flushRetryCount: asOptionalNumber(cfg.flushRetryCount),
+    flushRetryBaseDelayMs: asOptionalNumber(cfg.flushRetryBaseDelayMs),
   };
 }
 
@@ -42,6 +60,7 @@ export type ActiveTrace = {
   trace: Trace;
   llmSpan: Span | null;
   toolSpans: Map<string, Span>;
+  subagentSpans: Map<string, Span>;
   startedAt: number;
   lastActivityAt: number;
   /** Cost metadata accumulated from model.usage diagnostic events. */
