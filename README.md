@@ -101,8 +101,6 @@ OpenClaw warns when `plugins.allow` is empty and a community plugin is discovere
 }
 ```
 
-Legacy config key `plugins.entries.opik` is still read for backward compatibility, but `plugins.entries.opik-openclaw` is the canonical key.
-
 ### Environment fallbacks
 
 - `OPIK_API_KEY`
