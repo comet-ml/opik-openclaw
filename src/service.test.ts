@@ -584,6 +584,46 @@ describe("opik service", () => {
       // No trace was created
       expect(mockTraceFn).not.toHaveBeenCalled();
     });
+
+    test("adds run/tool correlation metadata when available", async () => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockToolSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        {
+          toolName: "web_search",
+          params: { query: "test" },
+          runId: "run-1",
+          toolCallId: "call-1",
+        },
+        toolCtx("s1", { sessionId: "ephemeral-1", agentId: "agent-7" }),
+      );
+
+      expect(mockTrace.span).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          name: "web_search",
+          type: "tool",
+          input: { query: "test" },
+          metadata: {
+            agentId: "agent-7",
+            sessionId: "ephemeral-1",
+            runId: "run-1",
+            toolCallId: "call-1",
+          },
+        }),
+      );
+    });
   });
 
   // =========================================================================
@@ -778,6 +818,91 @@ describe("opik service", () => {
       expect(ctx.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining("after_tool_call missing sessionKey"),
       );
+    });
+
+    test("matches tool span by toolCallId when same tool name overlaps", async () => {
+      const { api, hooks } = createApi();
+      const mockToolSpanA = opikState.createMockSpan();
+      const mockToolSpanB = opikState.createMockSpan();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      mockTrace.span
+        .mockReturnValueOnce(mockLlmSpan)
+        .mockReturnValueOnce(mockToolSpanA)
+        .mockReturnValueOnce(mockToolSpanB);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        {
+          toolName: "search",
+          params: { query: "A" },
+          runId: "run-1",
+          toolCallId: "call-a",
+        },
+        toolCtx("s1", { sessionId: "sess-1", agentId: "agent-1" }),
+      );
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        {
+          toolName: "search",
+          params: { query: "B" },
+          runId: "run-1",
+          toolCallId: "call-b",
+        },
+        toolCtx("s1", { sessionId: "sess-1", agentId: "agent-1" }),
+      );
+
+      // End B first; without toolCallId matching this would incorrectly close A first.
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        {
+          toolName: "search",
+          result: { slot: "B" },
+          runId: "run-1",
+          toolCallId: "call-b",
+        },
+        toolCtx("s1", { sessionId: "sess-1", agentId: "agent-1" }),
+      );
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        {
+          toolName: "search",
+          result: { slot: "A" },
+          runId: "run-1",
+          toolCallId: "call-a",
+        },
+        toolCtx("s1", { sessionId: "sess-1", agentId: "agent-1" }),
+      );
+
+      expect(mockToolSpanB.update).toHaveBeenCalledWith({
+        output: { slot: "B" },
+        metadata: {
+          agentId: "agent-1",
+          sessionId: "sess-1",
+          runId: "run-1",
+          toolCallId: "call-b",
+        },
+      });
+      expect(mockToolSpanA.update).toHaveBeenCalledWith({
+        output: { slot: "A" },
+        metadata: {
+          agentId: "agent-1",
+          sessionId: "sess-1",
+          runId: "run-1",
+          toolCallId: "call-a",
+        },
+      });
+      expect(mockToolSpanA.end).toHaveBeenCalledTimes(1);
+      expect(mockToolSpanB.end).toHaveBeenCalledTimes(1);
     });
 
     test("falls back via agentId when sessionKey is missing and multiple traces are active", async () => {

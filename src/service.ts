@@ -63,6 +63,17 @@ function hasCostUsageFields(costMeta: ActiveTrace["costMeta"]): boolean {
   );
 }
 
+function resolveToolCallId(
+  event: Record<string, unknown>,
+  ctx: Record<string, unknown>,
+): string | undefined {
+  return asNonEmptyString(event.toolCallId) ?? asNonEmptyString(ctx.toolCallId);
+}
+
+function resolveRunId(event: Record<string, unknown>, ctx: Record<string, unknown>): string | undefined {
+  return asNonEmptyString(event.runId) ?? asNonEmptyString(ctx.runId);
+}
+
 function formatError(err: unknown): string {
   if (err instanceof Error) {
     return err.stack ?? err.message;
@@ -511,12 +522,26 @@ export function createOpikService(
 
         active.lastActivityAt = Date.now();
 
+        const eventObj = event as Record<string, unknown>;
+        const ctxObj = toolCtx as Record<string, unknown>;
+        const runId = resolveRunId(eventObj, ctxObj);
+        const toolCallId = resolveToolCallId(eventObj, ctxObj);
+        const sessionId = asNonEmptyString(ctxObj.sessionId);
+
+        const spanMetadata: Record<string, unknown> = {
+          ...(toolCtx.agentId ? { agentId: toolCtx.agentId } : {}),
+          ...(sessionId ? { sessionId } : {}),
+          ...(runId ? { runId } : {}),
+          ...(toolCallId ? { toolCallId } : {}),
+        };
+
         let toolSpan: Span;
         try {
           toolSpan = active.trace.span({
             name: event.toolName,
             type: "tool",
             input: event.params,
+            ...(Object.keys(spanMetadata).length > 0 ? { metadata: spanMetadata } : {}),
           });
         } catch (err) {
           log.warn(
@@ -525,8 +550,19 @@ export function createOpikService(
           return;
         }
 
-        // Use a monotonic counter to avoid collisions within the same tick.
-        const spanKey = `${event.toolName}:${++spanSeq}`;
+        const spanKey = toolCallId
+          ? `toolcall:${toolCallId}`
+          : `${event.toolName}:${++spanSeq}`;
+        if (toolCallId) {
+          const existing = active.toolSpans.get(spanKey);
+          if (existing) {
+            safeSpanEnd(
+              existing,
+              `replace duplicate toolCallId sessionKey=${sessionKey} toolCallId=${toolCallId}`,
+            );
+            active.toolSpans.delete(spanKey);
+          }
+        }
         active.toolSpans.set(spanKey, toolSpan);
       });
 
@@ -535,6 +571,12 @@ export function createOpikService(
       // =====================================================================
       api.on("after_tool_call", (event, toolCtx) => {
         if (!client) return;
+        const eventObj = event as Record<string, unknown>;
+        const ctxObj = toolCtx as Record<string, unknown>;
+        const runId = resolveRunId(eventObj, ctxObj);
+        const toolCallId = resolveToolCallId(eventObj, ctxObj);
+        const sessionId = asNonEmptyString(ctxObj.sessionId);
+
         let sessionKey = toolCtx.sessionKey;
         let fallbackMode: "agentId" | "single active trace" | "last active session" | undefined;
         if (!sessionKey) {
@@ -564,14 +606,24 @@ export function createOpikService(
 
         active.lastActivityAt = Date.now();
 
-        // Find the matching tool span (FIFO: oldest span for this tool name).
+        // Prefer exact toolCallId correlation when available, then fall back to FIFO by tool name.
         let matchedKey: string | undefined;
         let matchedSpan: Span | undefined;
-        for (const [key, span] of active.toolSpans) {
-          if (key.startsWith(`${event.toolName}:`)) {
-            matchedKey = key;
-            matchedSpan = span;
-            break;
+        if (toolCallId) {
+          const toolCallKey = `toolcall:${toolCallId}`;
+          const toolCallSpan = active.toolSpans.get(toolCallKey);
+          if (toolCallSpan) {
+            matchedKey = toolCallKey;
+            matchedSpan = toolCallSpan;
+          }
+        }
+        if (!matchedSpan) {
+          for (const [key, span] of active.toolSpans) {
+            if (key.startsWith(`${event.toolName}:`)) {
+              matchedKey = key;
+              matchedSpan = span;
+              break;
+            }
           }
         }
         if (!matchedKey || !matchedSpan) return;
@@ -580,11 +632,15 @@ export function createOpikService(
         if (event.params && typeof event.params === "object" && !Array.isArray(event.params)) {
           spanUpdate.input = event.params;
         }
-        if (event.durationMs !== undefined || toolCtx.agentId) {
-          spanUpdate.metadata = {
-            ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
-            ...(toolCtx.agentId ? { agentId: toolCtx.agentId } : {}),
-          };
+        const spanMetadata: Record<string, unknown> = {
+          ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+          ...(toolCtx.agentId ? { agentId: toolCtx.agentId } : {}),
+          ...(sessionId ? { sessionId } : {}),
+          ...(runId ? { runId } : {}),
+          ...(toolCallId ? { toolCallId } : {}),
+        };
+        if (Object.keys(spanMetadata).length > 0) {
+          spanUpdate.metadata = spanMetadata;
         }
 
         if (event.error) {
