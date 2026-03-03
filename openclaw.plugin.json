@@ -14,7 +14,12 @@
       "tags": {
         "type": "array",
         "items": { "type": "string" }
-      }
+      },
+      "staleTraceCleanupEnabled": { "type": "boolean" },
+      "staleTraceTimeoutMs": { "type": "number" },
+      "staleSweepIntervalMs": { "type": "number" },
+      "flushRetryCount": { "type": "number" },
+      "flushRetryBaseDelayMs": { "type": "number" }
     }
   },
   "uiHints": {
@@ -44,6 +49,30 @@
     "tags": {
       "label": "Default Tags",
       "help": "List of tags applied to every created trace."
+    },
+    "staleTraceCleanupEnabled": {
+      "label": "Stale Cleanup Enabled",
+      "help": "When enabled, traces inactive longer than the timeout are force-closed."
+    },
+    "staleTraceTimeoutMs": {
+      "label": "Stale Timeout (ms)",
+      "placeholder": "300000",
+      "help": "Inactivity window before stale traces are force-closed. Default is 300000."
+    },
+    "staleSweepIntervalMs": {
+      "label": "Stale Sweep Interval (ms)",
+      "placeholder": "60000",
+      "help": "How often stale traces are scanned. Default is 60000."
+    },
+    "flushRetryCount": {
+      "label": "Flush Retry Count",
+      "placeholder": "2",
+      "help": "Number of retry attempts after a failed flush. Default is 2."
+    },
+    "flushRetryBaseDelayMs": {
+      "label": "Flush Retry Base Delay (ms)",
+      "placeholder": "250",
+      "help": "Base delay for exponential flush retry backoff. Default is 250."
     }
   }
 }
