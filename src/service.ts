@@ -27,26 +27,11 @@ const DEFAULT_FLUSH_RETRY_COUNT = 2;
 const DEFAULT_FLUSH_RETRY_BASE_DELAY_MS = 250;
 const MAX_FLUSH_RETRY_DELAY_MS = 5000;
 const OPIK_PLUGIN_ID = "opik-openclaw";
-const OPIK_LEGACY_PLUGIN_ID = "opik";
 
 type ServiceLogger = {
   info: (message: string) => void;
   warn: (message: string) => void;
 };
-
-function asObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  return value as Record<string, unknown>;
-}
-
-function hasPluginEntry(entry: Record<string, unknown>): boolean {
-  if (typeof entry.enabled === "boolean") {
-    return true;
-  }
-  return Object.keys(asObject(entry.config)).length > 0 || Object.keys(entry).length > 0;
-}
 
 function mergeDefinedConfig(
   base: OpikPluginConfig,
@@ -129,24 +114,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-function readLegacyOpikConfig(config: unknown): OpikPluginConfig {
-  const root = asObject(config);
-  const plugins = asObject(root.plugins);
-  const entries = asObject(plugins.entries);
-  const canonicalEntry = asObject(entries[OPIK_PLUGIN_ID]);
-  const legacyEntry = asObject(entries[OPIK_LEGACY_PLUGIN_ID]);
-  const entry = hasPluginEntry(canonicalEntry) ? canonicalEntry : legacyEntry;
-  const enabled = typeof entry.enabled === "boolean" ? entry.enabled : undefined;
-  const rootConfig = parseOpikPluginConfig(root.opik);
-  const entryConfig = parseOpikPluginConfig(entry.config);
-  const merged = mergeDefinedConfig(rootConfig, entryConfig);
-
-  if (enabled !== undefined) {
-    merged.enabled = enabled;
-  }
-  return merged;
 }
 
 export function createOpikService(
@@ -413,8 +380,8 @@ export function createOpikService(
         warn: ctx.logger.warn.bind(ctx.logger),
       };
 
-      const legacyCfg = readLegacyOpikConfig(ctx.config);
-      const opikCfg: OpikPluginConfig = { ...legacyCfg, ...pluginConfig };
+      const runtimeCfg = parseOpikPluginConfig(ctx.config);
+      const opikCfg = mergeDefinedConfig(runtimeCfg, pluginConfig);
 
       if (!opikCfg?.enabled) {
         return;
