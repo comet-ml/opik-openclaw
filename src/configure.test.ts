@@ -8,7 +8,7 @@ import {
 } from "./configure.js";
 
 describe("configure helpers", () => {
-  test("setOpikPluginEntry writes plugins.entries.opik", () => {
+  test("setOpikPluginEntry writes plugins.entries.opik-openclaw", () => {
     const next = setOpikPluginEntry(
       {} as any,
       {
@@ -22,8 +22,8 @@ describe("configure helpers", () => {
       true,
     ) as any;
 
-    expect(next.plugins.entries.opik.enabled).toBe(true);
-    expect(next.plugins.entries.opik.config).toEqual({
+    expect(next.plugins.entries["opik-openclaw"].enabled).toBe(true);
+    expect(next.plugins.entries["opik-openclaw"].config).toEqual({
       enabled: true,
       apiKey: "test-key",
       apiUrl: "https://opik.example.com",
@@ -31,9 +31,56 @@ describe("configure helpers", () => {
       workspaceName: "test-workspace",
       tags: ["tag-a", "tag-b"],
     });
+    expect(next.plugins.entries.opik).toBeUndefined();
   });
 
-  test("getOpikPluginEntry reads plugin-scoped config", () => {
+  test("setOpikPluginEntry migrates legacy plugins.entries.opik", () => {
+    const next = setOpikPluginEntry(
+      {
+        plugins: {
+          entries: {
+            opik: {
+              enabled: false,
+              config: {
+                projectName: "legacy",
+              },
+            },
+          },
+        },
+      } as any,
+      { workspaceName: "default" },
+      true,
+    ) as any;
+
+    expect(next.plugins.entries.opik).toBeUndefined();
+    expect(next.plugins.entries["opik-openclaw"]).toEqual({
+      enabled: true,
+      config: {
+        projectName: "legacy",
+        workspaceName: "default",
+      },
+    });
+  });
+
+  test("getOpikPluginEntry reads canonical plugin-scoped config", () => {
+    const parsed = getOpikPluginEntry({
+      plugins: {
+        entries: {
+          "opik-openclaw": {
+            enabled: false,
+            config: {
+              projectName: "project-x",
+            },
+          },
+        },
+      },
+    } as any);
+
+    expect(parsed.enabled).toBe(false);
+    expect(parsed.config.projectName).toBe("project-x");
+  });
+
+  test("getOpikPluginEntry falls back to legacy plugin-scoped config", () => {
     const parsed = getOpikPluginEntry({
       plugins: {
         entries: {
@@ -59,7 +106,7 @@ describe("opik status command", () => {
       ({
         plugins: {
           entries: {
-            opik: {
+            "opik-openclaw": {
               enabled: true,
               config: {
                 enabled: true,
@@ -100,7 +147,7 @@ describe("opik status command", () => {
         ({
           plugins: {
             entries: {
-              opik: {
+              "opik-openclaw": {
                 enabled: true,
                 config: {
                   enabled: true,
