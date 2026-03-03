@@ -8,3 +8,4 @@ export const OPIK_PLUGIN_ID = "opik-openclaw";
 export const LOCAL_ATTACHMENT_UPLOAD_MAGIC_ID = "BEMinIO";
 export const ATTACHMENT_UPLOAD_PART_SIZE_BYTES = 8 * 1024 * 1024;
 export const DEFAULT_ATTACHMENT_BASE_URL = "https://www.comet.com/opik/api";
+export const DEFAULT_UPLOADED_ATTACHMENT_CACHE_MAX_KEYS = 2048;
