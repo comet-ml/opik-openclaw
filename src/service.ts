@@ -26,11 +26,40 @@ const DEFAULT_STALE_SWEEP_INTERVAL_MS = 60 * 1000;
 const DEFAULT_FLUSH_RETRY_COUNT = 2;
 const DEFAULT_FLUSH_RETRY_BASE_DELAY_MS = 250;
 const MAX_FLUSH_RETRY_DELAY_MS = 5000;
+const OPIK_PLUGIN_ID = "opik-openclaw";
+const OPIK_LEGACY_PLUGIN_ID = "opik";
 
 type ServiceLogger = {
   info: (message: string) => void;
   warn: (message: string) => void;
 };
+
+function asObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
+function hasPluginEntry(entry: Record<string, unknown>): boolean {
+  if (typeof entry.enabled === "boolean") {
+    return true;
+  }
+  return Object.keys(asObject(entry.config)).length > 0 || Object.keys(entry).length > 0;
+}
+
+function mergeDefinedConfig(
+  base: OpikPluginConfig,
+  override: OpikPluginConfig,
+): OpikPluginConfig {
+  const merged: OpikPluginConfig = { ...base };
+  const mutable = merged as Record<string, unknown>;
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) continue;
+    mutable[key] = value;
+  }
+  return merged;
+}
 
 function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -103,11 +132,21 @@ function sleep(ms: number): Promise<void> {
 }
 
 function readLegacyOpikConfig(config: unknown): OpikPluginConfig {
-  if (!config || typeof config !== "object" || Array.isArray(config)) {
-    return {};
+  const root = asObject(config);
+  const plugins = asObject(root.plugins);
+  const entries = asObject(plugins.entries);
+  const canonicalEntry = asObject(entries[OPIK_PLUGIN_ID]);
+  const legacyEntry = asObject(entries[OPIK_LEGACY_PLUGIN_ID]);
+  const entry = hasPluginEntry(canonicalEntry) ? canonicalEntry : legacyEntry;
+  const enabled = typeof entry.enabled === "boolean" ? entry.enabled : undefined;
+  const rootConfig = parseOpikPluginConfig(root.opik);
+  const entryConfig = parseOpikPluginConfig(entry.config);
+  const merged = mergeDefinedConfig(rootConfig, entryConfig);
+
+  if (enabled !== undefined) {
+    merged.enabled = enabled;
   }
-  const root = config as Record<string, unknown>;
-  return parseOpikPluginConfig(root.opik);
+  return merged;
 }
 
 export function createOpikService(
@@ -367,7 +406,7 @@ export function createOpikService(
   }
 
   return {
-    id: "opik",
+    id: OPIK_PLUGIN_ID,
     async start(ctx) {
       log = {
         info: ctx.logger.info.bind(ctx.logger),
