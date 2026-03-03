@@ -89,6 +89,10 @@ export type ActiveTrace = {
   model?: string;
   /** Last known provider from hooks or diagnostics. */
   provider?: string;
+  /** Last known channel id from hook context. */
+  channelId?: string;
+  /** Last known trigger from hook context. */
+  trigger?: string;
   /** Output accumulated from llm_output. */
   output?: { output: string; lastAssistant?: unknown };
   /** Data stored by agent_end for deferred finalization. */

@@ -294,6 +294,33 @@ describe("opik service", () => {
       );
     });
 
+    test("prefers channelId and records trigger metadata when provided", async () => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "gpt-4", provider: "openai", prompt: "Hello" },
+        agentCtx("session-1", { channelId: "discord", trigger: "cron" }),
+      );
+
+      expect(mockTraceFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "gpt-4 \u00b7 discord",
+          metadata: expect.objectContaining({
+            channel: "discord",
+            channelId: "discord",
+            trigger: "cron",
+          }),
+        }),
+      );
+    });
+
     test("uses custom tags from config", async () => {
       const { api, hooks } = createApi();
       const service = createOpikService(api as any);
@@ -388,7 +415,7 @@ describe("opik service", () => {
         hooks,
         "llm_input",
         { model: "gpt-4", provider: "openai", prompt: "hi" },
-        agentCtx("s1"),
+        agentCtx("s1", { channelId: "discord", trigger: "cron" }),
       );
 
       invokeHook(
@@ -435,7 +462,7 @@ describe("opik service", () => {
         hooks,
         "llm_input",
         { model: "gpt-4", provider: "openai", prompt: "hi" },
-        agentCtx("s1"),
+        agentCtx("s1", { channelId: "discord", trigger: "cron" }),
       );
 
       invokeHook(
@@ -583,6 +610,46 @@ describe("opik service", () => {
 
       // No trace was created
       expect(mockTraceFn).not.toHaveBeenCalled();
+    });
+
+    test("adds run/tool correlation metadata when available", async () => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockToolSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        {
+          toolName: "web_search",
+          params: { query: "test" },
+          runId: "run-1",
+          toolCallId: "call-1",
+        },
+        toolCtx("s1", { sessionId: "ephemeral-1", agentId: "agent-7" }),
+      );
+
+      expect(mockTrace.span).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          name: "web_search",
+          type: "tool",
+          input: { query: "test" },
+          metadata: {
+            agentId: "agent-7",
+            sessionId: "ephemeral-1",
+            runId: "run-1",
+            toolCallId: "call-1",
+          },
+        }),
+      );
     });
   });
 
@@ -778,6 +845,91 @@ describe("opik service", () => {
       expect(ctx.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining("after_tool_call missing sessionKey"),
       );
+    });
+
+    test("matches tool span by toolCallId when same tool name overlaps", async () => {
+      const { api, hooks } = createApi();
+      const mockToolSpanA = opikState.createMockSpan();
+      const mockToolSpanB = opikState.createMockSpan();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      mockTrace.span
+        .mockReturnValueOnce(mockLlmSpan)
+        .mockReturnValueOnce(mockToolSpanA)
+        .mockReturnValueOnce(mockToolSpanB);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        {
+          toolName: "search",
+          params: { query: "A" },
+          runId: "run-1",
+          toolCallId: "call-a",
+        },
+        toolCtx("s1", { sessionId: "sess-1", agentId: "agent-1" }),
+      );
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        {
+          toolName: "search",
+          params: { query: "B" },
+          runId: "run-1",
+          toolCallId: "call-b",
+        },
+        toolCtx("s1", { sessionId: "sess-1", agentId: "agent-1" }),
+      );
+
+      // End B first; without toolCallId matching this would incorrectly close A first.
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        {
+          toolName: "search",
+          result: { slot: "B" },
+          runId: "run-1",
+          toolCallId: "call-b",
+        },
+        toolCtx("s1", { sessionId: "sess-1", agentId: "agent-1" }),
+      );
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        {
+          toolName: "search",
+          result: { slot: "A" },
+          runId: "run-1",
+          toolCallId: "call-a",
+        },
+        toolCtx("s1", { sessionId: "sess-1", agentId: "agent-1" }),
+      );
+
+      expect(mockToolSpanB.update).toHaveBeenCalledWith({
+        output: { slot: "B" },
+        metadata: {
+          agentId: "agent-1",
+          sessionId: "sess-1",
+          runId: "run-1",
+          toolCallId: "call-b",
+        },
+      });
+      expect(mockToolSpanA.update).toHaveBeenCalledWith({
+        output: { slot: "A" },
+        metadata: {
+          agentId: "agent-1",
+          sessionId: "sess-1",
+          runId: "run-1",
+          toolCallId: "call-a",
+        },
+      });
+      expect(mockToolSpanA.end).toHaveBeenCalledTimes(1);
+      expect(mockToolSpanB.end).toHaveBeenCalledTimes(1);
     });
 
     test("falls back via agentId when sessionKey is missing and multiple traces are active", async () => {
@@ -1058,7 +1210,7 @@ describe("opik service", () => {
         hooks,
         "llm_input",
         { model: "gpt-4", provider: "openai", prompt: "hi" },
-        agentCtx("s1"),
+        agentCtx("s1", { channelId: "discord", trigger: "cron" }),
       );
 
       invokeHook(
@@ -1090,6 +1242,9 @@ describe("opik service", () => {
 
       expect(metadata.model).toBe("gpt-4");
       expect(metadata.provider).toBe("openai");
+      expect(metadata.channel).toBe("discord");
+      expect(metadata.channelId).toBe("discord");
+      expect(metadata.trigger).toBe("cron");
       expect(metadata.usage).toEqual({
         input: 100,
         output: 50,

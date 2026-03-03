@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "vitest run src/**/*.e2e.test.ts",
     "smoke": "vitest run src/plugin.smoke.test.ts"
   },
   "dependencies": {

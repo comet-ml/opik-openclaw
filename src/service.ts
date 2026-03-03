@@ -36,6 +36,14 @@ function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function resolveChannelId(ctx: Record<string, unknown>): string | undefined {
+  return asNonEmptyString(ctx.channelId) ?? asNonEmptyString(ctx.messageProvider);
+}
+
+function resolveTrigger(ctx: Record<string, unknown>): string | undefined {
+  return asNonEmptyString(ctx.trigger);
+}
+
 function asNonNegativeNumber(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return undefined;
@@ -61,6 +69,17 @@ function hasCostUsageFields(costMeta: ActiveTrace["costMeta"]): boolean {
     costMeta.usageCacheWrite != null ||
     costMeta.usageTotal != null
   );
+}
+
+function resolveToolCallId(
+  event: Record<string, unknown>,
+  ctx: Record<string, unknown>,
+): string | undefined {
+  return asNonEmptyString(event.toolCallId) ?? asNonEmptyString(ctx.toolCallId);
+}
+
+function resolveRunId(event: Record<string, unknown>, ctx: Record<string, unknown>): string | undefined {
+  return asNonEmptyString(event.runId) ?? asNonEmptyString(ctx.runId);
 }
 
 function formatError(err: unknown): string {
@@ -130,6 +149,18 @@ export function createOpikService(
     if (typeof agentId === "string" && agentId.length > 0) {
       sessionByAgentId.set(agentId, sessionKey);
     }
+  }
+
+  function applyContextMeta(active: ActiveTrace, ctx: Record<string, unknown>): void {
+    const explicitChannelId = asNonEmptyString(ctx.channelId);
+    const fallbackChannel = asNonEmptyString(ctx.messageProvider);
+    if (explicitChannelId) {
+      active.channelId = explicitChannelId;
+    } else if (!active.channelId && fallbackChannel) {
+      active.channelId = fallbackChannel;
+    }
+    const trigger = resolveTrigger(ctx);
+    if (trigger) active.trigger = trigger;
   }
 
   function forgetSessionCorrelation(sessionKey: string): void {
@@ -292,6 +323,8 @@ export function createOpikService(
       durationMs: agentEnd?.durationMs,
       model: active.model ?? active.costMeta.model,
       provider: active.provider ?? active.costMeta.provider,
+      ...(active.channelId ? { channel: active.channelId, channelId: active.channelId } : {}),
+      ...(active.trigger ? { trigger: active.trigger } : {}),
     };
 
     // Prefer accumulated llm_output usage, fall back to diagnostic costMeta usage.
@@ -384,6 +417,9 @@ export function createOpikService(
         const sessionKey = agentCtx.sessionKey;
         if (!sessionKey) return;
         rememberSessionCorrelation(sessionKey, agentCtx.agentId);
+        const agentCtxObj = agentCtx as Record<string, unknown>;
+        const channelId = resolveChannelId(agentCtxObj);
+        const trigger = resolveTrigger(agentCtxObj);
 
         // Close any pre-existing trace for this session to avoid leaks.
         const existing = activeTraces.get(sessionKey);
@@ -396,7 +432,7 @@ export function createOpikService(
         let trace: Trace;
         try {
           trace = client.trace({
-            name: `${event.model} · ${agentCtx.messageProvider ?? "unknown"}`,
+            name: `${event.model} · ${channelId ?? "unknown"}`,
             threadId: sessionKey,
             input: {
               prompt: event.prompt,
@@ -409,7 +445,8 @@ export function createOpikService(
               sessionId: event.sessionId,
               runId: event.runId,
               agentId: agentCtx.agentId,
-              channel: agentCtx.messageProvider,
+              ...(channelId ? { channel: channelId, channelId } : {}),
+              ...(trigger ? { trigger } : {}),
             },
             tags: tags.length > 0 ? tags : undefined,
           });
@@ -448,6 +485,8 @@ export function createOpikService(
           usage: {},
           model: event.model,
           provider: event.provider,
+          channelId,
+          trigger,
         });
       });
 
@@ -463,6 +502,7 @@ export function createOpikService(
         const active = activeTraces.get(sessionKey);
         if (!active?.llmSpan) return;
 
+        applyContextMeta(active, agentCtx as Record<string, unknown>);
         active.lastActivityAt = Date.now();
 
         // Trace output uses joined text for readability; LLM span retains raw array for debugging.
@@ -511,12 +551,26 @@ export function createOpikService(
 
         active.lastActivityAt = Date.now();
 
+        const eventObj = event as Record<string, unknown>;
+        const ctxObj = toolCtx as Record<string, unknown>;
+        const runId = resolveRunId(eventObj, ctxObj);
+        const toolCallId = resolveToolCallId(eventObj, ctxObj);
+        const sessionId = asNonEmptyString(ctxObj.sessionId);
+
+        const spanMetadata: Record<string, unknown> = {
+          ...(toolCtx.agentId ? { agentId: toolCtx.agentId } : {}),
+          ...(sessionId ? { sessionId } : {}),
+          ...(runId ? { runId } : {}),
+          ...(toolCallId ? { toolCallId } : {}),
+        };
+
         let toolSpan: Span;
         try {
           toolSpan = active.trace.span({
             name: event.toolName,
             type: "tool",
             input: event.params,
+            ...(Object.keys(spanMetadata).length > 0 ? { metadata: spanMetadata } : {}),
           });
         } catch (err) {
           log.warn(
@@ -525,8 +579,19 @@ export function createOpikService(
           return;
         }
 
-        // Use a monotonic counter to avoid collisions within the same tick.
-        const spanKey = `${event.toolName}:${++spanSeq}`;
+        const spanKey = toolCallId
+          ? `toolcall:${toolCallId}`
+          : `${event.toolName}:${++spanSeq}`;
+        if (toolCallId) {
+          const existing = active.toolSpans.get(spanKey);
+          if (existing) {
+            safeSpanEnd(
+              existing,
+              `replace duplicate toolCallId sessionKey=${sessionKey} toolCallId=${toolCallId}`,
+            );
+            active.toolSpans.delete(spanKey);
+          }
+        }
         active.toolSpans.set(spanKey, toolSpan);
       });
 
@@ -535,6 +600,12 @@ export function createOpikService(
       // =====================================================================
       api.on("after_tool_call", (event, toolCtx) => {
         if (!client) return;
+        const eventObj = event as Record<string, unknown>;
+        const ctxObj = toolCtx as Record<string, unknown>;
+        const runId = resolveRunId(eventObj, ctxObj);
+        const toolCallId = resolveToolCallId(eventObj, ctxObj);
+        const sessionId = asNonEmptyString(ctxObj.sessionId);
+
         let sessionKey = toolCtx.sessionKey;
         let fallbackMode: "agentId" | "single active trace" | "last active session" | undefined;
         if (!sessionKey) {
@@ -564,14 +635,24 @@ export function createOpikService(
 
         active.lastActivityAt = Date.now();
 
-        // Find the matching tool span (FIFO: oldest span for this tool name).
+        // Prefer exact toolCallId correlation when available, then fall back to FIFO by tool name.
         let matchedKey: string | undefined;
         let matchedSpan: Span | undefined;
-        for (const [key, span] of active.toolSpans) {
-          if (key.startsWith(`${event.toolName}:`)) {
-            matchedKey = key;
-            matchedSpan = span;
-            break;
+        if (toolCallId) {
+          const toolCallKey = `toolcall:${toolCallId}`;
+          const toolCallSpan = active.toolSpans.get(toolCallKey);
+          if (toolCallSpan) {
+            matchedKey = toolCallKey;
+            matchedSpan = toolCallSpan;
+          }
+        }
+        if (!matchedSpan) {
+          for (const [key, span] of active.toolSpans) {
+            if (key.startsWith(`${event.toolName}:`)) {
+              matchedKey = key;
+              matchedSpan = span;
+              break;
+            }
           }
         }
         if (!matchedKey || !matchedSpan) return;
@@ -580,11 +661,15 @@ export function createOpikService(
         if (event.params && typeof event.params === "object" && !Array.isArray(event.params)) {
           spanUpdate.input = event.params;
         }
-        if (event.durationMs !== undefined || toolCtx.agentId) {
-          spanUpdate.metadata = {
-            ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
-            ...(toolCtx.agentId ? { agentId: toolCtx.agentId } : {}),
-          };
+        const spanMetadata: Record<string, unknown> = {
+          ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+          ...(toolCtx.agentId ? { agentId: toolCtx.agentId } : {}),
+          ...(sessionId ? { sessionId } : {}),
+          ...(runId ? { runId } : {}),
+          ...(toolCallId ? { toolCallId } : {}),
+        };
+        if (Object.keys(spanMetadata).length > 0) {
+          spanUpdate.metadata = spanMetadata;
         }
 
         if (event.error) {
@@ -813,6 +898,7 @@ export function createOpikService(
         const active = activeTraces.get(sessionKey);
         if (!active) return;
 
+        applyContextMeta(active, agentCtx as Record<string, unknown>);
         // Close any orphaned tool/subagent spans synchronously.
         for (const [toolKey, toolSpan] of active.toolSpans) {
           safeSpanEnd(toolSpan, `agent_end orphan tool sessionKey=${sessionKey} toolKey=${toolKey}`);
