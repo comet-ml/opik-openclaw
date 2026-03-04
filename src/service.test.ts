@@ -842,6 +842,35 @@ describe("opik service", () => {
       expect(mockToolSpan.end).toHaveBeenCalled();
     });
 
+    test("normalizes escaped newlines in tool output strings", async () => {
+      const { api, hooks } = createApi();
+      const mockToolSpan = opikState.createMockSpan();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+      invokeHook(hooks, "before_tool_call", { toolName: "search", params: {} }, toolCtx("s1"));
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        {
+          toolName: "search",
+          result: "line 1\\nline 2",
+        },
+        toolCtx("s1"),
+      );
+
+      expect(mockToolSpan.update).toHaveBeenCalledWith({
+        output: { result: "line 1\nline 2" },
+      });
+      expect(mockToolSpan.end).toHaveBeenCalled();
+    });
+
     test("uses after_tool_call params and duration metadata when provided", async () => {
       const { api, hooks } = createApi();
       const mockToolSpan = opikState.createMockSpan();
