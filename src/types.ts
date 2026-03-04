@@ -7,6 +7,7 @@ export type OpikPluginConfig = {
   projectName?: string;
   workspaceName?: string;
   tags?: string[];
+  toolResultPersistSanitizeEnabled?: boolean;
   staleTraceTimeoutMs?: number;
   staleSweepIntervalMs?: number;
   staleTraceCleanupEnabled?: boolean;
@@ -46,6 +47,10 @@ export function parseOpikPluginConfig(raw: unknown): OpikPluginConfig {
     projectName: asOptionalString(cfg.projectName),
     workspaceName: asOptionalString(cfg.workspaceName),
     tags,
+    toolResultPersistSanitizeEnabled:
+      typeof cfg.toolResultPersistSanitizeEnabled === "boolean"
+        ? cfg.toolResultPersistSanitizeEnabled
+        : undefined,
     staleTraceTimeoutMs: asOptionalNumber(cfg.staleTraceTimeoutMs),
     staleSweepIntervalMs: asOptionalNumber(cfg.staleSweepIntervalMs),
     staleTraceCleanupEnabled:

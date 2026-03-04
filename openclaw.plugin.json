@@ -15,6 +15,7 @@
         "type": "array",
         "items": { "type": "string" }
       },
+      "toolResultPersistSanitizeEnabled": { "type": "boolean" },
       "staleTraceCleanupEnabled": { "type": "boolean" },
       "staleTraceTimeoutMs": { "type": "number" },
       "staleSweepIntervalMs": { "type": "number" },
@@ -49,6 +50,10 @@
     "tags": {
       "label": "Default Tags",
       "help": "List of tags applied to every created trace."
+    },
+    "toolResultPersistSanitizeEnabled": {
+      "label": "Sanitize Persisted Tool Messages",
+      "help": "When enabled, tool_result_persist rewrites local image refs in persisted tool transcript messages. Disabled by default."
     },
     "staleTraceCleanupEnabled": {
       "label": "Stale Cleanup Enabled",

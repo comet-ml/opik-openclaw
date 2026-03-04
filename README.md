@@ -77,6 +77,7 @@ Then confirm traces in your Opik project.
           "projectName": "openclaw",
           "workspaceName": "default",
           "tags": ["openclaw"],
+          "toolResultPersistSanitizeEnabled": false,
           "staleTraceCleanupEnabled": true,
           "staleTraceTimeoutMs": 300000,
           "staleSweepIntervalMs": 60000,
@@ -107,6 +108,11 @@ OpenClaw warns when `plugins.allow` is empty and a community plugin is discovere
 - `OPIK_URL_OVERRIDE`
 - `OPIK_PROJECT_NAME`
 - `OPIK_WORKSPACE`
+
+### Transcript safety default
+
+`toolResultPersistSanitizeEnabled` is disabled by default. When enabled, the plugin rewrites local
+image refs in persisted tool transcript messages via `tool_result_persist`.
 
 ## CLI commands
 

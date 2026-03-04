@@ -88,6 +88,7 @@ type OpikCfg = {
   projectName?: string;
   workspaceName?: string;
   tags?: string[];
+  toolResultPersistSanitizeEnabled?: boolean;
   staleTraceTimeoutMs?: number;
   staleSweepIntervalMs?: number;
   staleTraceCleanupEnabled?: boolean;
@@ -227,7 +228,7 @@ describe("opik service", () => {
       const service = createOpikService(api as any);
       await service.start(createServiceContext() as any);
 
-      expect(api.on).toHaveBeenCalledTimes(10);
+      expect(api.on).toHaveBeenCalledTimes(9);
       expect(api.on).toHaveBeenCalledWith("llm_input", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("llm_output", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("before_tool_call", expect.any(Function));
@@ -236,9 +237,23 @@ describe("opik service", () => {
       expect(api.on).toHaveBeenCalledWith("subagent_delivery_target", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_spawned", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_ended", expect.any(Function));
-      expect(api.on).toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
+      expect(api.on).not.toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
       expect(diagnosticListeners).toHaveLength(1);
+    });
+
+    test("registers tool_result_persist hook only when enabled", async () => {
+      const { api } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(
+        createServiceContext(true, {
+          enabled: true,
+          apiKey: "test-key",
+          toolResultPersistSanitizeEnabled: true,
+        }) as any,
+      );
+
+      expect(api.on).toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
     });
   });
 
@@ -827,6 +842,35 @@ describe("opik service", () => {
       expect(mockToolSpan.end).toHaveBeenCalled();
     });
 
+    test("normalizes escaped newlines in tool output strings", async () => {
+      const { api, hooks } = createApi();
+      const mockToolSpan = opikState.createMockSpan();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+      invokeHook(hooks, "before_tool_call", { toolName: "search", params: {} }, toolCtx("s1"));
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        {
+          toolName: "search",
+          result: "line 1\\nline 2",
+        },
+        toolCtx("s1"),
+      );
+
+      expect(mockToolSpan.update).toHaveBeenCalledWith({
+        output: { result: "line 1\nline 2" },
+      });
+      expect(mockToolSpan.end).toHaveBeenCalled();
+    });
+
     test("uses after_tool_call params and duration metadata when provided", async () => {
       const { api, hooks } = createApi();
       const mockToolSpan = opikState.createMockSpan();
@@ -1300,7 +1344,13 @@ describe("opik service", () => {
     test("sanitizes persisted tool messages with media image references", async () => {
       const { api, hooks } = createApi();
       const service = createOpikService(api as any);
-      await service.start(createServiceContext() as any);
+      await service.start(
+        createServiceContext(true, {
+          enabled: true,
+          apiKey: "test-key",
+          toolResultPersistSanitizeEnabled: true,
+        }) as any,
+      );
 
       const result = invokeHook(
         hooks,
@@ -1326,7 +1376,13 @@ describe("opik service", () => {
     test("returns undefined when no sanitization is needed", async () => {
       const { api, hooks } = createApi();
       const service = createOpikService(api as any);
-      await service.start(createServiceContext() as any);
+      await service.start(
+        createServiceContext(true, {
+          enabled: true,
+          apiKey: "test-key",
+          toolResultPersistSanitizeEnabled: true,
+        }) as any,
+      );
 
       const result = invokeHook(
         hooks,
@@ -1342,6 +1398,20 @@ describe("opik service", () => {
       );
 
       expect(result).toBeUndefined();
+    });
+
+    test("is not registered when tool_result_persist sanitization is disabled", async () => {
+      const { api, hooks } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(
+        createServiceContext(true, {
+          enabled: true,
+          apiKey: "test-key",
+          toolResultPersistSanitizeEnabled: false,
+        }) as any,
+      );
+
+      expect(hooks.tool_result_persist).toBeUndefined();
     });
   });
 
