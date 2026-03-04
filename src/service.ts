@@ -397,6 +397,24 @@ export function createOpikService(
       });
 
       // =====================================================================
+      // Hook: tool_result_persist — sanitize persisted tool messages
+      // =====================================================================
+      api.on("tool_result_persist", (event) => {
+        try {
+          const eventObj = event as Record<string, unknown>;
+          const message = eventObj.message;
+          if (!message || typeof message !== "object") return;
+
+          const sanitizedMessage = sanitizeValueForOpik(message);
+          if (sanitizedMessage !== message) {
+            return { message: sanitizedMessage };
+          }
+        } catch (err) {
+          log.warn(`opik: tool_result_persist failed: ${formatError(err)}`);
+        }
+      });
+
+      // =====================================================================
       // Hook: agent_end — Finalize Trace
       // =====================================================================
       api.on("agent_end", (event, agentCtx) => {
