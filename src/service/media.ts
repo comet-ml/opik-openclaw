@@ -30,9 +30,6 @@ const MEDIA_EXTENSIONS = new Set([
   ".mkv",
 ]);
 
-const LOCAL_MEDIA_PATH_RE =
-  /(?:^|[\s|[(])((?:~\/|\/)[^|\]\n\r]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|mp3|wav|m4a|aac|ogg|oga|flac|opus|caf|weba|webm|mp4|mov|mkv))(?:\s*\([^)]+\))?/gi;
-
 const MEDIA_SCHEME_LOCAL_PATH_RE =
   /\bmedia:((?:~\/|\/)[^\s"'`]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|mp3|wav|m4a|aac|ogg|oga|flac|opus|caf|weba|webm|mp4|mov|mkv))(?=[\s"'`]|$)/gi;
 
@@ -50,10 +47,11 @@ export function normalizeLocalMediaPath(candidate: string): string | undefined {
 }
 
 export function collectMediaPathsFromString(value: string, target: Set<string>): void {
-  for (const match of value.matchAll(LOCAL_MEDIA_PATH_RE)) {
-    const candidate = normalizeLocalMediaPath(match[1] ?? "");
-    if (candidate) target.add(candidate);
-  }
+  // Accept direct path values in structured payload fields (for example, image.path),
+  // but avoid scanning arbitrary prose/log text for incidental absolute paths.
+  const directPath = normalizeLocalMediaPath(value);
+  if (directPath) target.add(directPath);
+
   for (const match of value.matchAll(MEDIA_SCHEME_LOCAL_PATH_RE)) {
     const candidate = normalizeLocalMediaPath(match[1] ?? "");
     if (candidate) target.add(candidate);
