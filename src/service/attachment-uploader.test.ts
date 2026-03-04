@@ -211,4 +211,31 @@ describe("attachment uploader", () => {
 
     expect(attachmentsApi.startMultiPartUpload).toHaveBeenCalledTimes(1);
   });
+
+  test("skips uploads when attachment uploads are disabled", async () => {
+    const { dir, filePath } = await createTempMediaFile();
+    tempDirs.push(dir);
+
+    const attachmentsApi = createAttachmentsApi();
+    const client = { api: { attachments: attachmentsApi } };
+
+    const uploader = createAttachmentUploader({
+      getClient: () => client as unknown as Opik,
+      getAttachmentBaseUrl: () => "https://www.comet.com/opik/api",
+      onWarn: () => undefined,
+      formatError: (err) => String(err),
+      attachmentsEnabled: false,
+    });
+
+    uploader.scheduleMediaAttachmentUploads({
+      entityType: "trace",
+      entity: { id: "trace-1" },
+      projectName: "openclaw",
+      reason: "disabled",
+      payloads: [`media:${filePath}`],
+    });
+    await uploader.waitForUploads();
+
+    expect(attachmentsApi.startMultiPartUpload).not.toHaveBeenCalled();
+  });
 });
