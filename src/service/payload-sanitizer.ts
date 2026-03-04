@@ -2,7 +2,11 @@ const MEDIA_IMAGE_REFERENCE_RE =
   /\bmedia:(?:https?:\/\/[^\s"'`]+|\.[/][^\s"'`]+|[/][^\s"'`]+|[^\s"'`]+)\.(?:jpe?g|png|webp|gif)(?=[\s"'`]|$)/gi;
 
 export function sanitizeStringForOpik(value: string): string {
-  return value.replace(MEDIA_IMAGE_REFERENCE_RE, "media:<image-ref>");
+  const normalizedNewlines = value
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\r");
+  return normalizedNewlines.replace(MEDIA_IMAGE_REFERENCE_RE, "media:<image-ref>");
 }
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
