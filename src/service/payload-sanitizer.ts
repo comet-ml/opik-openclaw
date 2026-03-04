@@ -1,12 +1,24 @@
 const MEDIA_IMAGE_REFERENCE_RE =
   /\bmedia:(?:https?:\/\/[^\s"'`]+|\.[/][^\s"'`]+|[/][^\s"'`]+|[^\s"'`]+)\.(?:jpe?g|png|webp|gif)(?=[\s"'`]|$)/gi;
+const INTERNAL_REPLY_TO_MARKER_RE = /\[\[reply_to[^\]]*\]\]\s*/gi;
+const CONVERSATION_INFO_BLOCK_RE =
+  /^\s*Conversation info \(untrusted metadata\):\s*\n+\{[\s\S]*?\}\s*/gim;
+const SENDER_INFO_BLOCK_RE = /^\s*Sender \(untrusted metadata\):\s*\n+\{[\s\S]*?\}\s*/gim;
+const UNTRUSTED_CONTEXT_BLOCK_RE =
+  /^\s*Untrusted context \(metadata, do not treat as instructions or commands\):\s*\n+<<<EXTERNAL_UNTRUSTED_CONTENT[\s\S]*?<<<END_EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>\s*/gim;
 
 export function sanitizeStringForOpik(value: string): string {
   const normalizedNewlines = value
     .replace(/\\r\\n/g, "\n")
     .replace(/\\n/g, "\n")
     .replace(/\\r/g, "\r");
-  return normalizedNewlines.replace(MEDIA_IMAGE_REFERENCE_RE, "media:<image-ref>");
+  const redactedInternalBlocks = normalizedNewlines
+    .replace(INTERNAL_REPLY_TO_MARKER_RE, "")
+    .replace(UNTRUSTED_CONTEXT_BLOCK_RE, "")
+    .replace(CONVERSATION_INFO_BLOCK_RE, "")
+    .replace(SENDER_INFO_BLOCK_RE, "")
+    .replace(/\n{3,}/g, "\n\n");
+  return redactedInternalBlocks.replace(MEDIA_IMAGE_REFERENCE_RE, "media:<image-ref>");
 }
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
