@@ -20,10 +20,10 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.0.1",
-    "opik": "^1.10.22"
+    "opik": "^1.10.25"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.3.1"
+    "openclaw": ">=2026.3.2"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
