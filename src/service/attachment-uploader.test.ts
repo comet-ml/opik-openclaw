@@ -159,4 +159,56 @@ describe("attachment uploader", () => {
     await uploader.waitForUploads();
     expect(attachmentsApi.startMultiPartUpload).toHaveBeenCalledTimes(1);
   });
+
+  test("does not upload incidental media paths embedded in plain text", async () => {
+    const { dir, filePath } = await createTempMediaFile();
+    tempDirs.push(dir);
+
+    const attachmentsApi = createAttachmentsApi();
+    const client = { api: { attachments: attachmentsApi } };
+
+    const uploader = createAttachmentUploader({
+      getClient: () => client as unknown as Opik,
+      getAttachmentBaseUrl: () => "https://www.comet.com/opik/api",
+      onWarn: () => undefined,
+      formatError: (err) => String(err),
+    });
+
+    uploader.scheduleMediaAttachmentUploads({
+      entityType: "trace",
+      entity: { id: "trace-1" },
+      projectName: "openclaw",
+      reason: "plain-text-path",
+      payloads: [`debug dump: unexpected path ${filePath} from prior run`],
+    });
+    await uploader.waitForUploads();
+
+    expect(attachmentsApi.startMultiPartUpload).not.toHaveBeenCalled();
+  });
+
+  test("uploads direct path values without requiring media: prefix", async () => {
+    const { dir, filePath } = await createTempMediaFile();
+    tempDirs.push(dir);
+
+    const attachmentsApi = createAttachmentsApi();
+    const client = { api: { attachments: attachmentsApi } };
+
+    const uploader = createAttachmentUploader({
+      getClient: () => client as unknown as Opik,
+      getAttachmentBaseUrl: () => "https://www.comet.com/opik/api",
+      onWarn: () => undefined,
+      formatError: (err) => String(err),
+    });
+
+    uploader.scheduleMediaAttachmentUploads({
+      entityType: "trace",
+      entity: { id: "trace-1" },
+      projectName: "openclaw",
+      reason: "direct-path-value",
+      payloads: [filePath],
+    });
+    await uploader.waitForUploads();
+
+    expect(attachmentsApi.startMultiPartUpload).toHaveBeenCalledTimes(1);
+  });
 });
