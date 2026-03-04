@@ -1,6 +1,7 @@
 {
   "name": "@opik/opik-openclaw",
   "version": "0.2.3",
+  "license": "Apache-2.0",
   "description": "OpenClaw Opik exporter — sends LLM traces to Opik",
   "repository": {
     "type": "git",
