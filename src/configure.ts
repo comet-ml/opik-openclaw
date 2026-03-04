@@ -90,6 +90,18 @@ function buildOpikApiUrl(host: string): string {
   return `${normalized}${isLocal ? "/api" : "/opik/api"}`;
 }
 
+/**
+ * Build a browser URL pointing to the projects list in the Opik UI.
+ * Cloud/self-hosted: {host}opik/{workspace}/projects
+ * Local:             {host}{workspace}/projects
+ */
+function buildProjectsUrl(host: string, workspaceName: string): string {
+  const base = host.endsWith("/") ? host.slice(0, -1) : host;
+  const isLocal = base.includes("localhost") || base.includes("127.0.0.1");
+  const prefix = isLocal ? "" : "/opik";
+  return `${base}${prefix}/${encodeURIComponent(workspaceName)}/projects`;
+}
+
 // ---------------------------------------------------------------------------
 // API validation helpers (mirrors opik SDK api-helpers.ts)
 // ---------------------------------------------------------------------------
@@ -352,12 +364,16 @@ async function runOpikConfigure(deps: ConfigDeps): Promise<void> {
 
   await deps.writeConfigFile(nextCfg);
 
+  const projectsUrl = buildProjectsUrl(host, workspaceName);
+
   p.note(
     [
       `API URL:    ${apiUrl}`,
       `Workspace:  ${workspaceName}`,
       `Project:    ${projectName}`,
       `API key:    ${apiKey ? "***" : "(none)"}`,
+      "",
+      `View your projects: ${projectsUrl}`,
     ].join("\n"),
     "Opik configuration saved",
   );
