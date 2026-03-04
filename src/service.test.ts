@@ -227,14 +227,16 @@ describe("opik service", () => {
       const service = createOpikService(api as any);
       await service.start(createServiceContext() as any);
 
-      expect(api.on).toHaveBeenCalledTimes(8);
+      expect(api.on).toHaveBeenCalledTimes(10);
       expect(api.on).toHaveBeenCalledWith("llm_input", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("llm_output", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("before_tool_call", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("after_tool_call", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_spawning", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("subagent_delivery_target", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_spawned", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_ended", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
       expect(diagnosticListeners).toHaveLength(1);
     });
@@ -1223,6 +1225,123 @@ describe("opik service", () => {
         }),
       );
       expect(mockSubagentSpan.end).toHaveBeenCalledTimes(1);
+    });
+
+    test("records delivery-target metadata on active subagent span", async () => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockSubagentSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockSubagentSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "m", provider: "p", prompt: "" },
+        agentCtx("parent-session", { agentId: "parent-agent" }),
+      );
+
+      invokeHook(
+        hooks,
+        "subagent_spawning",
+        {
+          childSessionKey: "child-session",
+          agentId: "writer",
+          mode: "run",
+          threadRequested: true,
+        },
+        { requesterSessionKey: "parent-session", childSessionKey: "child-session", runId: "run-sub-1" },
+      );
+
+      invokeHook(
+        hooks,
+        "subagent_delivery_target",
+        {
+          childSessionKey: "child-session",
+          requesterSessionKey: "parent-session",
+          childRunId: "child-run-1",
+          spawnMode: "run",
+          expectsCompletionMessage: true,
+          requesterOrigin: {
+            channel: "discord",
+            accountId: "account-1",
+            to: "thread-42",
+            threadId: 42,
+          },
+        },
+        { requesterSessionKey: "parent-session", childSessionKey: "child-session", runId: "run-sub-1" },
+      );
+
+      expect(mockSubagentSpan.update).toHaveBeenCalledWith({
+        metadata: {
+          status: "delivery_target",
+          requesterSessionKey: "parent-session",
+          childSessionKey: "child-session",
+          childRunId: "child-run-1",
+          spawnMode: "run",
+          expectsCompletionMessage: true,
+          originChannel: "discord",
+          originAccountId: "account-1",
+          originTo: "thread-42",
+          originThreadId: 42,
+        },
+      });
+    });
+  });
+
+  // =========================================================================
+  // 6b. tool_result_persist hook
+  // =========================================================================
+  describe("tool_result_persist hook", () => {
+    test("sanitizes persisted tool messages with media image references", async () => {
+      const { api, hooks } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      const result = invokeHook(
+        hooks,
+        "tool_result_persist",
+        {
+          toolName: "read_file",
+          message: {
+            role: "tool",
+            content: "preview media:/tmp/image.png",
+          },
+        },
+        { sessionKey: "s1", agentId: "agent-1" },
+      );
+
+      expect(result).toEqual({
+        message: {
+          role: "tool",
+          content: "preview media:<image-ref>",
+        },
+      });
+    });
+
+    test("returns undefined when no sanitization is needed", async () => {
+      const { api, hooks } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      const result = invokeHook(
+        hooks,
+        "tool_result_persist",
+        {
+          toolName: "read_file",
+          message: {
+            role: "tool",
+            content: "plain text",
+          },
+        },
+        { sessionKey: "s1", agentId: "agent-1" },
+      );
+
+      expect(result).toBeUndefined();
     });
   });
 
