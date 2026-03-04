@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import type { Opik } from "opik";
 import {
+  ATTACHMENT_UPLOADS_ENABLED,
   ATTACHMENT_UPLOAD_PART_SIZE_BYTES,
   DEFAULT_UPLOADED_ATTACHMENT_CACHE_MAX_KEYS,
   LOCAL_ATTACHMENT_UPLOAD_MAGIC_ID,
@@ -42,6 +43,7 @@ type AttachmentUploaderDeps = {
   onWarn: (message: string) => void;
   formatError: (err: unknown) => string;
   uploadedAttachmentCacheMaxKeys?: number;
+  attachmentsEnabled?: boolean;
 };
 
 export type ScheduledMediaUpload = {
@@ -54,6 +56,7 @@ export type ScheduledMediaUpload = {
 
 export function createAttachmentUploader(deps: AttachmentUploaderDeps) {
   let attachmentQueue: Promise<void> = Promise.resolve();
+  const attachmentsEnabled = deps.attachmentsEnabled ?? ATTACHMENT_UPLOADS_ENABLED;
   const inFlightAttachmentKeys = new Set<string>();
   const uploadedAttachmentKeys = new Map<string, number>();
   const uploadedAttachmentCacheMaxKeys = Math.max(
@@ -85,6 +88,7 @@ export function createAttachmentUploader(deps: AttachmentUploaderDeps) {
     filePath: string;
     reason: string;
   }): Promise<void> {
+    if (!attachmentsEnabled) return;
     const baseClient = deps.getClient();
     if (!baseClient) return;
 
@@ -182,6 +186,7 @@ export function createAttachmentUploader(deps: AttachmentUploaderDeps) {
   }
 
   function scheduleMediaAttachmentUploads(params: ScheduledMediaUpload): void {
+    if (!attachmentsEnabled) return;
     const entityId = resolveEntityId(params.entity);
     if (!entityId) return;
 
