@@ -4,6 +4,11 @@ import type { ActiveTrace } from "../../types.js";
 import { asNonEmptyString } from "../helpers.js";
 import { sanitizeStringForOpik } from "../payload-sanitizer.js";
 
+function asStringOrNumber(value: unknown): string | number | undefined {
+  if (typeof value === "string" || typeof value === "number") return value;
+  return undefined;
+}
+
 type SubagentHooksDeps = {
   api: OpenClawPluginApi;
   getClient: () => Opik | null;
@@ -120,6 +125,77 @@ export function registerSubagentHooks(deps: SubagentHooksDeps): void {
         },
       },
       `subagent_spawned childSessionKey=${childSessionKey}`,
+    );
+  });
+
+  deps.api.on("subagent_delivery_target", (event, subagentCtx) => {
+    if (!deps.getClient()) return;
+
+    const eventObj = event as Record<string, unknown>;
+    const ctxObj = subagentCtx as Record<string, unknown>;
+
+    const requesterSessionKey =
+      asNonEmptyString(eventObj.requesterSessionKey) ?? asNonEmptyString(ctxObj.requesterSessionKey);
+    const childSessionKey =
+      asNonEmptyString(eventObj.childSessionKey) ?? asNonEmptyString(ctxObj.childSessionKey);
+    if (!childSessionKey) return;
+
+    const host = deps.resolveSubagentHostTrace({ requesterSessionKey, childSessionKey });
+    if (!host) return;
+
+    deps.rememberSessionCorrelation(host.sessionKey);
+    host.active.lastActivityAt = Date.now();
+
+    let span = host.active.subagentSpans.get(childSessionKey);
+    if (!span) {
+      try {
+        span = host.active.trace.span({
+          name: "subagent:delivery-target",
+          input: {
+            childSessionKey,
+            requesterSessionKey,
+          },
+        });
+        host.active.subagentSpans.set(childSessionKey, span);
+      } catch (err) {
+        deps.warn(
+          `opik: subagent span creation failed on delivery target (childSessionKey=${childSessionKey}): ${deps.formatError(err)}`,
+        );
+        return;
+      }
+    }
+
+    const requesterOrigin =
+      eventObj.requesterOrigin && typeof eventObj.requesterOrigin === "object" && !Array.isArray(eventObj.requesterOrigin)
+        ? (eventObj.requesterOrigin as Record<string, unknown>)
+        : undefined;
+    const childRunId = asNonEmptyString(eventObj.childRunId);
+    const spawnMode = asNonEmptyString(eventObj.spawnMode);
+    const expectsCompletionMessage = typeof eventObj.expectsCompletionMessage === "boolean"
+      ? eventObj.expectsCompletionMessage
+      : undefined;
+    const originChannel = asNonEmptyString(requesterOrigin?.channel);
+    const originAccountId = asNonEmptyString(requesterOrigin?.accountId);
+    const originTo = asNonEmptyString(requesterOrigin?.to);
+    const originThreadId = asStringOrNumber(requesterOrigin?.threadId);
+
+    deps.safeSpanUpdate(
+      span,
+      {
+        metadata: {
+          status: "delivery_target",
+          requesterSessionKey,
+          childSessionKey,
+          ...(childRunId ? { childRunId } : {}),
+          ...(spawnMode ? { spawnMode } : {}),
+          ...(expectsCompletionMessage !== undefined ? { expectsCompletionMessage } : {}),
+          ...(originChannel ? { originChannel } : {}),
+          ...(originAccountId ? { originAccountId } : {}),
+          ...(originTo ? { originTo } : {}),
+          ...(originThreadId !== undefined ? { originThreadId } : {}),
+        },
+      },
+      `subagent_delivery_target childSessionKey=${childSessionKey}`,
     );
   });
 
