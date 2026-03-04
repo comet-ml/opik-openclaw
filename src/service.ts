@@ -10,6 +10,7 @@ import { registerLlmHooks } from "./service/hooks/llm.js";
 import { registerSubagentHooks } from "./service/hooks/subagent.js";
 import { registerToolHooks } from "./service/hooks/tool.js";
 import {
+  ATTACHMENT_UPLOADS_ENABLED,
   DEFAULT_ATTACHMENT_BASE_URL,
   DEFAULT_FLUSH_RETRY_BASE_DELAY_MS,
   DEFAULT_FLUSH_RETRY_COUNT,
@@ -70,6 +71,7 @@ export function createOpikService(
     getAttachmentBaseUrl: () => attachmentBaseUrl,
     onWarn: (message) => log.warn(message),
     formatError,
+    attachmentsEnabled: ATTACHMENT_UPLOADS_ENABLED,
   });
 
   const exporterMetrics = {
