@@ -33,9 +33,16 @@ const MEDIA_EXTENSIONS = new Set([
 const MEDIA_SCHEME_LOCAL_PATH_RE =
   /\bmedia:((?:~\/|\/)[^\s"'`]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|mp3|wav|m4a|aac|ogg|oga|flac|opus|caf|weba|webm|mp4|mov|mkv))(?=[\s"'`]|$)/gi;
 
+const FILE_SCHEME_LOCAL_PATH_RE =
+  /\bfile:\/\/((?:~\/|\/)[^\s"'`]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|mp3|wav|m4a|aac|ogg|oga|flac|opus|caf|weba|webm|mp4|mov|mkv))(?:\?[^\s"'`]*)?(?=[\s"'`]|$)/gi;
+
+const MARKDOWN_LOCAL_MEDIA_PATH_RE =
+  /!?\[[^\]]*]\((?:file:\/\/)?((?:~\/|\/)[^)\s]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|mp3|wav|m4a|aac|ogg|oga|flac|opus|caf|weba|webm|mp4|mov|mkv))(?:\?[^)\s]*)?(?:\s+["'][^"']*["'])?\)/gi;
+
 export function normalizeLocalMediaPath(candidate: string): string | undefined {
   const trimmed = candidate.trim().replace(/[),.;:]+$/, "");
   if (!trimmed) return undefined;
+  if (!trimmed.startsWith("/") && !trimmed.startsWith("~/")) return undefined;
 
   const expanded = trimmed.startsWith("~/") ? resolve(homedir(), trimmed.slice(2)) : trimmed;
   const normalized = resolve(expanded);
@@ -46,15 +53,36 @@ export function normalizeLocalMediaPath(candidate: string): string | undefined {
   return normalized;
 }
 
+function decodeMaybeEncodedPath(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function addMediaPathCandidate(target: Set<string>, candidate: string): void {
+  const normalized = normalizeLocalMediaPath(candidate);
+  if (normalized) target.add(normalized);
+}
+
 export function collectMediaPathsFromString(value: string, target: Set<string>): void {
   // Accept direct path values in structured payload fields (for example, image.path),
   // but avoid scanning arbitrary prose/log text for incidental absolute paths.
-  const directPath = normalizeLocalMediaPath(value);
-  if (directPath) target.add(directPath);
+  addMediaPathCandidate(target, value);
 
   for (const match of value.matchAll(MEDIA_SCHEME_LOCAL_PATH_RE)) {
-    const candidate = normalizeLocalMediaPath(match[1] ?? "");
-    if (candidate) target.add(candidate);
+    addMediaPathCandidate(target, match[1] ?? "");
+  }
+
+  // Keep extraction conservative: only parse explicit local file URI references.
+  for (const match of value.matchAll(FILE_SCHEME_LOCAL_PATH_RE)) {
+    addMediaPathCandidate(target, decodeMaybeEncodedPath(match[1] ?? ""));
+  }
+
+  // Support explicit markdown links/images without scanning arbitrary plain text paths.
+  for (const match of value.matchAll(MARKDOWN_LOCAL_MEDIA_PATH_RE)) {
+    addMediaPathCandidate(target, decodeMaybeEncodedPath(match[1] ?? ""));
   }
 }
 
