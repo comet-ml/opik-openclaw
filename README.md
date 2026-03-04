@@ -18,7 +18,7 @@ Community plugin for <a href="https://github.com/openclaw/openclaw">OpenClaw</a>
 
 <div align="center">
 
-[![License](https://img.shields.io/npm/l/%40opik%2Fopik-openclaw)](https://www.npmjs.com/package/@opik/opik-openclaw)
+[![License](https://img.shields.io/github/license/comet-ml/opik-openclaw)](./LICENSE)
 [![npm version](https://img.shields.io/npm/v/%40opik%2Fopik-openclaw)](https://www.npmjs.com/package/@opik/opik-openclaw)
 
 </div>
