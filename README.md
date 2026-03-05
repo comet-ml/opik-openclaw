@@ -13,7 +13,7 @@
 </h1>
 
 <p align="center">
-Official plugin for <a href="https://github.com/openclaw/openclaw">OpenClaw</a> that exports agent traces to <a href="https://www.comet.com/docs/opik/">Opik</a> for observability, evaluation and guardrails.
+Official plugin for <a href="https://github.com/openclaw/openclaw">OpenClaw</a> that exports agent traces to <a href="https://www.comet.com/docs/opik/">Opik</a> for observability and monitoring.
 </p>
 
 <div align="center">
