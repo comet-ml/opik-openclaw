@@ -17,6 +17,7 @@ import {
   DEFAULT_STALE_SWEEP_INTERVAL_MS,
   DEFAULT_STALE_TRACE_TIMEOUT_MS,
   MAX_FLUSH_RETRY_DELAY_MS,
+  OPIK_CREATED_FROM,
   OPIK_PLUGIN_ID,
 } from "./service/constants.js";
 import {
@@ -258,6 +259,7 @@ export function createOpikService(
 
     const agentEnd = active.agentEnd;
     const metadata: Record<string, unknown> = {
+      created_from: OPIK_CREATED_FROM,
       ...active.costMeta,
       success: agentEnd?.success,
       durationMs: agentEnd?.durationMs,

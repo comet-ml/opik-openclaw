@@ -1,6 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { Opik, Span, Trace } from "opik";
 import type { ActiveTrace } from "../../types.js";
+import { OPIK_CREATED_FROM } from "../constants.js";
 import {
   mapUsageToOpikTokens,
   normalizeProvider,
@@ -63,6 +64,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
         threadId: sessionKey,
         input: sanitizedTraceInput,
         metadata: {
+          created_from: OPIK_CREATED_FROM,
           provider: normalizedProvider,
           model: event.model,
           sessionId: event.sessionId,
