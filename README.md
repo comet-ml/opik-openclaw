@@ -156,9 +156,7 @@ image refs in persisted tool transcript messages via `tool_result_persist`.
 
 ## Known limitation
 
-OpenClaw now propagates embedded `after_tool_call` context more reliably (including `sessionKey` and `agentId`, see openclaw/openclaw#32201). This plugin still keeps deterministic fallback logic for older OpenClaw versions where `sessionKey` can be missing; under high-concurrency multi-session workloads, fallback correlation can still misattribute a tool span.
-
-No OpenClaw core changes are included in this repository.
+No OpenClaw core changes are included in this repository and relies on native hooks within the OpenClaw ecosystem.
 
 ## Development
 
