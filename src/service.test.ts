@@ -291,6 +291,7 @@ describe("opik service", () => {
           threadId: "session-1",
           input: expect.objectContaining({ prompt: "Hello", systemPrompt: "You are helpful" }),
           metadata: expect.objectContaining({
+            created_from: "openclaw",
             provider: "openai",
             model: "gpt-4",
             channel: "telegram",
@@ -1571,6 +1572,7 @@ describe("opik service", () => {
 
       expect(metadata.model).toBe("gpt-4");
       expect(metadata.provider).toBe("openai");
+      expect(metadata.created_from).toBe("openclaw");
       expect(metadata.channel).toBe("discord");
       expect(metadata.channelId).toBe("discord");
       expect(metadata.trigger).toBe("cron");
