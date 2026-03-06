@@ -2,10 +2,10 @@ import { describe, expect, test } from "vitest";
 import { collectMediaPathsFromString, collectMediaPathsFromUnknown } from "./media.js";
 
 describe("media path extraction", () => {
-  test("collects direct local path values", () => {
+  test("does not collect direct local path values without an explicit marker", () => {
     const target = new Set<string>();
     collectMediaPathsFromString("/tmp/image.png", target);
-    expect([...target]).toEqual(["/tmp/image.png"]);
+    expect(target.size).toBe(0);
   });
 
   test("collects media: local path references", () => {
