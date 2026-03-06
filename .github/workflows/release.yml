@@ -54,6 +54,20 @@ jobs:
           echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve npm dist-tag
+        id: dist_tag
+        run: |
+          PACKAGE_VERSION="${{ steps.verify.outputs.package_version }}"
+
+          if [[ "$PACKAGE_VERSION" == *-* ]]; then
+            PRERELEASE="${PACKAGE_VERSION#*-}"
+            DIST_TAG="${PRERELEASE%%.*}"
+          else
+            DIST_TAG="latest"
+          fi
+
+          echo "dist_tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
+
       - name: Check if this version is already published
         id: exists
         run: |
@@ -96,9 +110,9 @@ jobs:
         if: steps.exists.outputs.already_published == 'false'
         run: |
           if [ "${{ github.event.repository.private }}" = "true" ]; then
-            npm publish --access public
+            npm publish --tag "${{ steps.dist_tag.outputs.dist_tag }}" --access public
           else
-            npm publish --provenance --access public
+            npm publish --provenance --tag "${{ steps.dist_tag.outputs.dist_tag }}" --access public
           fi
         env:
           NODE_AUTH_TOKEN: ""
