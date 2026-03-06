@@ -120,7 +120,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
       entity: trace,
       projectName: deps.projectName,
       reason: `llm_input sessionKey=${sessionKey}`,
-      payloads: [event.prompt, event.systemPrompt, event.historyMessages],
+      payloads: [event.prompt, Array.isArray(event.historyMessages) ? event.historyMessages.at(-1) : undefined],
     });
   });
 
