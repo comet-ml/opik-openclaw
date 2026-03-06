@@ -1157,6 +1157,89 @@ describe("opik service", () => {
       expect(mockToolSpanB.end).toHaveBeenCalledTimes(1);
     });
 
+    test("nests child-session tool spans under the active subagent span", async () => {
+      const { api, hooks } = createApi();
+      const parentTrace = opikState.createMockTrace();
+      const childTrace = opikState.createMockTrace();
+      const parentLlmSpan = opikState.createMockSpan();
+      const childLlmSpan = opikState.createMockSpan();
+      const childSubagentSpan = opikState.createMockSpan();
+      const nestedToolSpan = opikState.createMockSpan();
+
+      parentTrace.span.mockReturnValueOnce(parentLlmSpan).mockReturnValueOnce(childSubagentSpan);
+      childTrace.span.mockReturnValueOnce(childLlmSpan);
+      childSubagentSpan.span.mockReturnValueOnce(nestedToolSpan);
+      mockTraceFn.mockReturnValueOnce(parentTrace).mockReturnValueOnce(childTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "parent-model", provider: "p", prompt: "" },
+        agentCtx("parent-session", { agentId: "parent-agent" }),
+      );
+      invokeHook(
+        hooks,
+        "subagent_spawning",
+        {
+          childSessionKey: "child-session",
+          agentId: "writer",
+          mode: "run",
+        },
+        { requesterSessionKey: "parent-session", childSessionKey: "child-session", runId: "run-sub-1" },
+      );
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "child-model", provider: "p", prompt: "" },
+        agentCtx("child-session", { agentId: "child-agent" }),
+      );
+
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        {
+          toolName: "search",
+          params: { q: "nested" },
+          toolCallId: "call-child",
+        },
+        toolCtx("child-session", { agentId: "child-agent" }),
+      );
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        {
+          toolName: "search",
+          result: { ok: true },
+          toolCallId: "call-child",
+        },
+        toolCtx("child-session", { agentId: "child-agent" }),
+      );
+
+      expect(childSubagentSpan.span).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "search",
+          type: "tool",
+          input: { q: "nested" },
+          metadata: {
+            agentId: "child-agent",
+            toolCallId: "call-child",
+          },
+        }),
+      );
+      expect(childTrace.span).toHaveBeenCalledTimes(1);
+      expect(nestedToolSpan.update).toHaveBeenCalledWith({
+        metadata: {
+          agentId: "child-agent",
+          toolCallId: "call-child",
+        },
+        output: { ok: true },
+      });
+      expect(nestedToolSpan.end).toHaveBeenCalledTimes(1);
+    });
+
     test("falls back via agentId when sessionKey is missing and multiple traces are active", async () => {
       const { api, hooks } = createApi();
       const traceA = opikState.createMockTrace();
@@ -1373,6 +1456,98 @@ describe("opik service", () => {
           originThreadId: 42,
         },
       });
+    });
+
+    test("nests grandchild subagent spans under the requester subagent span", async () => {
+      const { api, hooks } = createApi();
+      const parentTrace = opikState.createMockTrace();
+      const childTrace = opikState.createMockTrace();
+      const parentLlmSpan = opikState.createMockSpan();
+      const childLlmSpan = opikState.createMockSpan();
+      const childSubagentSpan = opikState.createMockSpan();
+      const grandchildSubagentSpan = opikState.createMockSpan();
+
+      parentTrace.span.mockReturnValueOnce(parentLlmSpan).mockReturnValueOnce(childSubagentSpan);
+      childTrace.span.mockReturnValueOnce(childLlmSpan);
+      childSubagentSpan.span.mockReturnValueOnce(grandchildSubagentSpan);
+      mockTraceFn.mockReturnValueOnce(parentTrace).mockReturnValueOnce(childTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "parent-model", provider: "p", prompt: "" },
+        agentCtx("parent-session", { agentId: "parent-agent" }),
+      );
+      invokeHook(
+        hooks,
+        "subagent_spawning",
+        {
+          childSessionKey: "child-session",
+          agentId: "writer",
+          mode: "run",
+        },
+        { requesterSessionKey: "parent-session", childSessionKey: "child-session", runId: "run-child-1" },
+      );
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "child-model", provider: "p", prompt: "" },
+        agentCtx("child-session", { agentId: "child-agent" }),
+      );
+
+      invokeHook(
+        hooks,
+        "subagent_spawning",
+        {
+          childSessionKey: "grandchild-session",
+          agentId: "reviewer",
+          mode: "run",
+        },
+        { requesterSessionKey: "child-session", childSessionKey: "grandchild-session", runId: "run-grandchild-1" },
+      );
+      invokeHook(
+        hooks,
+        "subagent_spawned",
+        {
+          childSessionKey: "grandchild-session",
+          agentId: "reviewer",
+          mode: "run",
+          runId: "run-grandchild-1",
+        },
+        { requesterSessionKey: "child-session", childSessionKey: "grandchild-session", runId: "run-grandchild-1" },
+      );
+      invokeHook(
+        hooks,
+        "subagent_ended",
+        {
+          targetSessionKey: "grandchild-session",
+          targetKind: "subagent",
+          reason: "completed",
+          outcome: "ok",
+        },
+        { requesterSessionKey: "child-session", childSessionKey: "grandchild-session", runId: "run-grandchild-1" },
+      );
+
+      expect(childSubagentSpan.span).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "subagent:reviewer",
+          input: expect.objectContaining({ childSessionKey: "grandchild-session" }),
+        }),
+      );
+      expect(childTrace.span).toHaveBeenCalledTimes(1);
+      expect(grandchildSubagentSpan.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            status: "spawned",
+            childSessionKey: "grandchild-session",
+            runId: "run-grandchild-1",
+          }),
+        }),
+      );
+      expect(grandchildSubagentSpan.end).toHaveBeenCalledTimes(1);
     });
   });
 

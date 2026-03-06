@@ -49,6 +49,10 @@ export function createOpikService(
 ): OpenClawPluginService {
   let client: Opik | null = null;
   const activeTraces = new Map<string, ActiveTrace>();
+  const subagentSpanHosts = new Map<
+    string,
+    { hostSessionKey: string; active: ActiveTrace; span: Span }
+  >();
   const sessionByAgentId = new Map<string, string>();
   let cleanup: (() => void) | null = null;
   let spanSeq = 0;
@@ -111,6 +115,33 @@ export function createOpikService(
     for (const [agentId, mappedSessionKey] of sessionByAgentId) {
       if (mappedSessionKey === sessionKey) {
         sessionByAgentId.delete(agentId);
+      }
+    }
+  }
+
+  function rememberSubagentSpanHost(
+    sessionKey: string,
+    hostSessionKey: string,
+    active: ActiveTrace,
+    span: Span,
+  ): void {
+    subagentSpanHosts.set(sessionKey, { hostSessionKey, active, span });
+  }
+
+  function getSubagentSpanHost(
+    sessionKey: string,
+  ): { hostSessionKey: string; active: ActiveTrace; span: Span } | undefined {
+    return subagentSpanHosts.get(sessionKey);
+  }
+
+  function forgetSubagentSpanHost(sessionKey: string): void {
+    subagentSpanHosts.delete(sessionKey);
+  }
+
+  function forgetSubagentSpanHostsByActive(active: ActiveTrace): void {
+    for (const [sessionKey, spanHost] of subagentSpanHosts) {
+      if (spanHost.active === active) {
+        subagentSpanHosts.delete(sessionKey);
       }
     }
   }
@@ -178,6 +209,7 @@ export function createOpikService(
 
   function closeActiveTrace(active: ActiveTrace, reason: string): void {
     endChildSpans(active, reason);
+    forgetSubagentSpanHostsByActive(active);
 
     // Clear deferred finalization state so stale microtasks no-op.
     active.agentEnd = undefined;
@@ -186,17 +218,44 @@ export function createOpikService(
     safeTraceEnd(active.trace, reason);
   }
 
-  function resolveSubagentHostTrace(params: {
+  function resolveSessionSpanContainer(
+    sessionKey: string,
+  ): { sessionKey: string; active: ActiveTrace; parent: Trace | Span } | undefined {
+    const spanHost = getSubagentSpanHost(sessionKey);
+    if (spanHost) {
+      return {
+        sessionKey: spanHost.hostSessionKey,
+        active: spanHost.active,
+        parent: spanHost.span,
+      };
+    }
+
+    const active = activeTraces.get(sessionKey);
+    if (active) {
+      return { sessionKey, active, parent: active.trace };
+    }
+
+    return undefined;
+  }
+
+  function resolveSubagentSpanContainer(params: {
     requesterSessionKey?: string;
     childSessionKey?: string;
     targetSessionKey?: string;
-  }): { sessionKey: string; active: ActiveTrace } | undefined {
-    const candidates = [params.requesterSessionKey, params.childSessionKey, params.targetSessionKey];
+  }): { sessionKey: string; active: ActiveTrace; parent: Trace | Span } | undefined {
+    if (params.requesterSessionKey) {
+      const requesterContainer = resolveSessionSpanContainer(params.requesterSessionKey);
+      if (requesterContainer) {
+        return requesterContainer;
+      }
+    }
+
+    const candidates = [params.childSessionKey, params.targetSessionKey];
     for (const key of candidates) {
       if (!key) continue;
       const active = activeTraces.get(key);
       if (active) {
-        return { sessionKey: key, active };
+        return { sessionKey: key, active, parent: active.trace };
       }
     }
     return undefined;
@@ -303,6 +362,7 @@ export function createOpikService(
     );
 
     safeTraceEnd(active.trace, `finalize sessionKey=${sessionKey}`);
+    forgetSubagentSpanHostsByActive(active);
     activeTraces.delete(sessionKey);
     forgetSessionCorrelation(sessionKey);
     scheduleFlush(`trace-finalized sessionKey=${sessionKey}`);
@@ -377,6 +437,7 @@ export function createOpikService(
         sessionByAgentId,
         getLastActiveSessionKey: () => lastActiveSessionKey,
         rememberSessionCorrelation,
+        resolveSessionSpanContainer,
         warnMissingAfterToolSessionKey,
         nextSpanSeq: () => ++spanSeq,
         safeSpanUpdate,
@@ -391,7 +452,10 @@ export function createOpikService(
         api,
         getClient: () => client,
         rememberSessionCorrelation,
-        resolveSubagentHostTrace,
+        resolveSubagentSpanContainer,
+        getSubagentSpanHost,
+        rememberSubagentSpanHost,
+        forgetSubagentSpanHost,
         safeSpanUpdate,
         safeSpanEnd,
         warn: (message) => log.warn(message),
@@ -533,6 +597,7 @@ export function createOpikService(
                 );
 
                 safeTraceEnd(active.trace, `stale cleanup sessionKey=${key}`);
+                forgetSubagentSpanHostsByActive(active);
                 activeTraces.delete(key);
                 forgetSessionCorrelation(key);
               }

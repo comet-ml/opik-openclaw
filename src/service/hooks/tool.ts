@@ -1,5 +1,5 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import type { Opik, Span } from "opik";
+import type { Opik, Span, Trace } from "opik";
 import type { ActiveTrace } from "../../types.js";
 import { asNonEmptyString, resolveRunId, resolveToolCallId } from "../helpers.js";
 import { sanitizeStringForOpik, sanitizeValueForOpik } from "../payload-sanitizer.js";
@@ -11,6 +11,9 @@ type ToolHooksDeps = {
   sessionByAgentId: Map<string, string>;
   getLastActiveSessionKey: () => string | undefined;
   rememberSessionCorrelation: (sessionKey: string, agentId?: unknown) => void;
+  resolveSessionSpanContainer: (
+    sessionKey: string,
+  ) => { sessionKey: string; active: ActiveTrace; parent: Trace | Span } | undefined;
   warnMissingAfterToolSessionKey: (fallbackMode: string) => void;
   nextSpanSeq: () => number;
   safeSpanUpdate: (span: Span, payload: Record<string, unknown>, reason: string) => void;
@@ -34,8 +37,9 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
     if (!sessionKey) return;
     deps.rememberSessionCorrelation(sessionKey, toolCtx.agentId);
 
-    const active = deps.activeTraces.get(sessionKey);
-    if (!active) return;
+    const container = deps.resolveSessionSpanContainer(sessionKey);
+    if (!container) return;
+    const active = container.active;
 
     active.lastActivityAt = Date.now();
 
@@ -54,7 +58,7 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
 
     let toolSpan: Span;
     try {
-      toolSpan = active.trace.span({
+      toolSpan = container.parent.span({
         name: event.toolName,
         type: "tool",
         input: sanitizeValueForOpik(event.params) as any,
@@ -68,8 +72,8 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
     }
 
     const spanKey = toolCallId
-      ? `toolcall:${toolCallId}`
-      : `${event.toolName}:${deps.nextSpanSeq()}`;
+      ? `session:${sessionKey}:toolcall:${toolCallId}`
+      : `session:${sessionKey}:${event.toolName}:${deps.nextSpanSeq()}`;
     if (toolCallId) {
       const existing = active.toolSpans.get(spanKey);
       if (existing) {
@@ -126,15 +130,16 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
     if (!sessionKey) return;
     deps.rememberSessionCorrelation(sessionKey, toolCtx.agentId);
 
-    const active = deps.activeTraces.get(sessionKey);
-    if (!active) return;
+    const container = deps.resolveSessionSpanContainer(sessionKey);
+    if (!container) return;
+    const active = container.active;
 
     active.lastActivityAt = Date.now();
 
     let matchedKey: string | undefined;
     let matchedSpan: Span | undefined;
     if (toolCallId) {
-      const toolCallKey = `toolcall:${toolCallId}`;
+      const toolCallKey = `session:${sessionKey}:toolcall:${toolCallId}`;
       const toolCallSpan = active.toolSpans.get(toolCallKey);
       if (toolCallSpan) {
         matchedKey = toolCallKey;
@@ -143,7 +148,7 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
     }
     if (!matchedSpan) {
       for (const [key, span] of active.toolSpans) {
-        if (key.startsWith(`${event.toolName}:`)) {
+        if (key.startsWith(`session:${sessionKey}:${event.toolName}:`)) {
           matchedKey = key;
           matchedSpan = span;
           break;

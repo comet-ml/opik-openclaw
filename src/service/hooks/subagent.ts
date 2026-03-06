@@ -1,5 +1,5 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import type { Opik, Span } from "opik";
+import type { Opik, Span, Trace } from "opik";
 import type { ActiveTrace } from "../../types.js";
 import { asNonEmptyString } from "../helpers.js";
 import { sanitizeStringForOpik } from "../payload-sanitizer.js";
@@ -13,11 +13,21 @@ type SubagentHooksDeps = {
   api: OpenClawPluginApi;
   getClient: () => Opik | null;
   rememberSessionCorrelation: (sessionKey: string, agentId?: unknown) => void;
-  resolveSubagentHostTrace: (params: {
+  resolveSubagentSpanContainer: (params: {
     requesterSessionKey?: string;
     childSessionKey?: string;
     targetSessionKey?: string;
-  }) => { sessionKey: string; active: ActiveTrace } | undefined;
+  }) => { sessionKey: string; active: ActiveTrace; parent: Trace | Span } | undefined;
+  getSubagentSpanHost: (
+    sessionKey: string,
+  ) => { hostSessionKey: string; active: ActiveTrace; span: Span } | undefined;
+  rememberSubagentSpanHost: (
+    sessionKey: string,
+    hostSessionKey: string,
+    active: ActiveTrace,
+    span: Span,
+  ) => void;
+  forgetSubagentSpanHost: (sessionKey: string) => void;
   safeSpanUpdate: (span: Span, payload: Record<string, unknown>, reason: string) => void;
   safeSpanEnd: (span: Span, reason: string) => void;
   warn: (message: string) => void;
@@ -36,20 +46,21 @@ export function registerSubagentHooks(deps: SubagentHooksDeps): void {
       asNonEmptyString(eventObj.childSessionKey) ?? asNonEmptyString(ctxObj.childSessionKey);
     if (!childSessionKey) return;
 
-    const host = deps.resolveSubagentHostTrace({ requesterSessionKey, childSessionKey });
+    const existingHost = deps.getSubagentSpanHost(childSessionKey);
+    if (existingHost) {
+      deps.safeSpanEnd(existingHost.span, `subagent reset childSessionKey=${childSessionKey}`);
+      existingHost.active.subagentSpans.delete(childSessionKey);
+      deps.forgetSubagentSpanHost(childSessionKey);
+    }
+
+    const host = deps.resolveSubagentSpanContainer({ requesterSessionKey, childSessionKey });
     if (!host) return;
 
     deps.rememberSessionCorrelation(host.sessionKey);
     host.active.lastActivityAt = Date.now();
 
-    const existing = host.active.subagentSpans.get(childSessionKey);
-    if (existing) {
-      deps.safeSpanEnd(existing, `subagent reset childSessionKey=${childSessionKey}`);
-      host.active.subagentSpans.delete(childSessionKey);
-    }
-
     try {
-      const span = host.active.trace.span({
+      const span = host.parent.span({
         name: `subagent:${asNonEmptyString(eventObj.agentId) ?? "unknown"}`,
         input: {
           childSessionKey,
@@ -67,6 +78,7 @@ export function registerSubagentHooks(deps: SubagentHooksDeps): void {
         },
       });
       host.active.subagentSpans.set(childSessionKey, span);
+      deps.rememberSubagentSpanHost(childSessionKey, host.sessionKey, host.active, span);
     } catch (err) {
       deps.warn(
         `opik: subagent span creation failed (childSessionKey=${childSessionKey}): ${deps.formatError(err)}`,
@@ -85,16 +97,19 @@ export function registerSubagentHooks(deps: SubagentHooksDeps): void {
       asNonEmptyString(eventObj.childSessionKey) ?? asNonEmptyString(ctxObj.childSessionKey);
     if (!childSessionKey) return;
 
-    const host = deps.resolveSubagentHostTrace({ requesterSessionKey, childSessionKey });
+    const existingHost = deps.getSubagentSpanHost(childSessionKey);
+    const host = existingHost
+      ? { sessionKey: existingHost.hostSessionKey, active: existingHost.active, parent: existingHost.span }
+      : deps.resolveSubagentSpanContainer({ requesterSessionKey, childSessionKey });
     if (!host) return;
 
     deps.rememberSessionCorrelation(host.sessionKey);
     host.active.lastActivityAt = Date.now();
 
-    let span = host.active.subagentSpans.get(childSessionKey);
+    let span = existingHost?.span ?? host.active.subagentSpans.get(childSessionKey);
     if (!span) {
       try {
-        span = host.active.trace.span({
+        span = host.parent.span({
           name: `subagent:${asNonEmptyString(eventObj.agentId) ?? "unknown"}`,
           input: {
             childSessionKey,
@@ -103,6 +118,7 @@ export function registerSubagentHooks(deps: SubagentHooksDeps): void {
           },
         });
         host.active.subagentSpans.set(childSessionKey, span);
+        deps.rememberSubagentSpanHost(childSessionKey, host.sessionKey, host.active, span);
       } catch (err) {
         deps.warn(
           `opik: subagent span creation failed on spawn (childSessionKey=${childSessionKey}): ${deps.formatError(err)}`,
@@ -140,16 +156,19 @@ export function registerSubagentHooks(deps: SubagentHooksDeps): void {
       asNonEmptyString(eventObj.childSessionKey) ?? asNonEmptyString(ctxObj.childSessionKey);
     if (!childSessionKey) return;
 
-    const host = deps.resolveSubagentHostTrace({ requesterSessionKey, childSessionKey });
+    const existingHost = deps.getSubagentSpanHost(childSessionKey);
+    const host = existingHost
+      ? { sessionKey: existingHost.hostSessionKey, active: existingHost.active, parent: existingHost.span }
+      : deps.resolveSubagentSpanContainer({ requesterSessionKey, childSessionKey });
     if (!host) return;
 
     deps.rememberSessionCorrelation(host.sessionKey);
     host.active.lastActivityAt = Date.now();
 
-    let span = host.active.subagentSpans.get(childSessionKey);
+    let span = existingHost?.span ?? host.active.subagentSpans.get(childSessionKey);
     if (!span) {
       try {
-        span = host.active.trace.span({
+        span = host.parent.span({
           name: "subagent:delivery-target",
           input: {
             childSessionKey,
@@ -157,6 +176,7 @@ export function registerSubagentHooks(deps: SubagentHooksDeps): void {
           },
         });
         host.active.subagentSpans.set(childSessionKey, span);
+        deps.rememberSubagentSpanHost(childSessionKey, host.sessionKey, host.active, span);
       } catch (err) {
         deps.warn(
           `opik: subagent span creation failed on delivery target (childSessionKey=${childSessionKey}): ${deps.formatError(err)}`,
@@ -210,16 +230,19 @@ export function registerSubagentHooks(deps: SubagentHooksDeps): void {
     const targetSessionKey =
       asNonEmptyString(eventObj.targetSessionKey) ?? childSessionKey;
 
-    const host = deps.resolveSubagentHostTrace({ requesterSessionKey, childSessionKey, targetSessionKey });
+    const existingHost = targetSessionKey ? deps.getSubagentSpanHost(targetSessionKey) : undefined;
+    const host = existingHost
+      ? { sessionKey: existingHost.hostSessionKey, active: existingHost.active, parent: existingHost.span }
+      : deps.resolveSubagentSpanContainer({ requesterSessionKey, childSessionKey, targetSessionKey });
     if (!host) return;
 
     deps.rememberSessionCorrelation(host.sessionKey);
     host.active.lastActivityAt = Date.now();
 
-    let span = targetSessionKey ? host.active.subagentSpans.get(targetSessionKey) : undefined;
+    let span = existingHost?.span ?? (targetSessionKey ? host.active.subagentSpans.get(targetSessionKey) : undefined);
     if (!span) {
       try {
-        span = host.active.trace.span({
+        span = host.parent.span({
           name: `subagent:${asNonEmptyString(eventObj.targetKind) ?? "unknown"}`,
           input: {
             targetSessionKey,
@@ -227,6 +250,10 @@ export function registerSubagentHooks(deps: SubagentHooksDeps): void {
             reason: eventObj.reason,
           },
         });
+        if (targetSessionKey) {
+          host.active.subagentSpans.set(targetSessionKey, span);
+          deps.rememberSubagentSpanHost(targetSessionKey, host.sessionKey, host.active, span);
+        }
       } catch (err) {
         deps.warn(
           `opik: subagent span creation failed on end (targetSessionKey=${targetSessionKey ?? "unknown"}): ${deps.formatError(err)}`,
@@ -270,6 +297,7 @@ export function registerSubagentHooks(deps: SubagentHooksDeps): void {
     deps.safeSpanEnd(span, `subagent_ended targetSessionKey=${targetSessionKey ?? "unknown"}`);
     if (targetSessionKey) {
       host.active.subagentSpans.delete(targetSessionKey);
+      deps.forgetSubagentSpanHost(targetSessionKey);
     }
   });
 }
