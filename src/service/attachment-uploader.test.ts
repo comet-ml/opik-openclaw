@@ -192,7 +192,7 @@ describe("attachment uploader", () => {
     expect(attachmentsApi.startMultiPartUpload).not.toHaveBeenCalled();
   });
 
-  test("uploads direct path values without requiring media: prefix", async () => {
+  test("does not upload direct path values without an explicit local-media marker", async () => {
     const { dir, filePath } = await createTempMediaFile();
     tempDirs.push(dir);
 
@@ -215,7 +215,7 @@ describe("attachment uploader", () => {
     });
     await uploader.waitForUploads();
 
-    expect(attachmentsApi.startMultiPartUpload).toHaveBeenCalledTimes(1);
+    expect(attachmentsApi.startMultiPartUpload).not.toHaveBeenCalled();
   });
 
   test("uploads multipart attachments without loading the whole file into one request body", async () => {
@@ -247,7 +247,7 @@ describe("attachment uploader", () => {
       entity: { id: "trace-1" },
       projectName: "openclaw",
       reason: "multipart",
-      payloads: [filePath],
+      payloads: [`media:${filePath}`],
     });
     await uploader.waitForUploads();
 

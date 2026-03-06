@@ -67,10 +67,8 @@ function addMediaPathCandidate(target: Set<string>, candidate: string): void {
 }
 
 export function collectMediaPathsFromString(value: string, target: Set<string>): void {
-  // Accept direct path values in structured payload fields (for example, image.path),
-  // but avoid scanning arbitrary prose/log text for incidental absolute paths.
-  addMediaPathCandidate(target, value);
-
+  // Only accept explicit local-media markers so arbitrary structured payload fields
+  // cannot trigger local file uploads by containing a raw absolute path string.
   for (const match of value.matchAll(MEDIA_SCHEME_LOCAL_PATH_RE)) {
     addMediaPathCandidate(target, match[1] ?? "");
   }
