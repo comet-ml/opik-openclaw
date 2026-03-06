@@ -459,7 +459,10 @@ export function createOpikService(
           entity: active.trace,
           projectName,
           reason: `agent_end sessionKey=${sessionKey}`,
-          payloads: [event.error, (event as Record<string, unknown>).messages],
+          payloads: [
+            event.error,
+            ((event as Record<string, unknown>).messages as unknown[] | undefined)?.at(-1),
+          ],
         });
 
         // Defer finalization to a microtask so llm_output (which fires on the
