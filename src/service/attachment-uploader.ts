@@ -1,4 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
+import { openAsBlob } from "node:fs";
+import { stat } from "node:fs/promises";
 import { basename } from "node:path";
 import type { Opik } from "opik";
 import {
@@ -104,12 +105,12 @@ export function createAttachmentUploader(deps: AttachmentUploaderDeps) {
       const stats = await stat(params.filePath);
       if (!stats.isFile() || stats.size <= 0) return;
 
-      const bytes = await readFile(params.filePath);
-      const totalSize = bytes.byteLength;
+      const totalSize = stats.size;
       const mimeType = guessMimeType(params.filePath);
       const fileName = basename(params.filePath) || "attachment.bin";
       const partCount = Math.max(1, Math.ceil(totalSize / ATTACHMENT_UPLOAD_PART_SIZE_BYTES));
       const pathBase64 = Buffer.from(deps.getAttachmentBaseUrl(), "utf8").toString("base64url");
+      const fileBlob = await openAsBlob(params.filePath, { type: mimeType });
 
       const started = await attachmentsApi.startMultiPartUpload({
         fileName,
@@ -127,7 +128,7 @@ export function createAttachmentUploader(deps: AttachmentUploaderDeps) {
       if (started.uploadId === LOCAL_ATTACHMENT_UPLOAD_MAGIC_ID) {
         const localResponse = await fetch(urls[0], {
           method: "PUT",
-          body: bytes,
+          body: fileBlob,
         });
         if (!localResponse.ok) {
           throw new Error(`local attachment upload failed status=${localResponse.status}`);
@@ -146,7 +147,7 @@ export function createAttachmentUploader(deps: AttachmentUploaderDeps) {
       for (let partNumber = 1; partNumber <= partCount; partNumber++) {
         const start = (partNumber - 1) * ATTACHMENT_UPLOAD_PART_SIZE_BYTES;
         const end = Math.min(start + ATTACHMENT_UPLOAD_PART_SIZE_BYTES, totalSize);
-        const chunk = bytes.subarray(start, end);
+        const chunk = fileBlob.slice(start, end, mimeType);
         const url = urls[partNumber - 1];
 
         const partResponse = await fetch(url, {
