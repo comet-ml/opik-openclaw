@@ -27,6 +27,9 @@ const opikState = vi.hoisted(() => {
 
 const mockOpikConstructor = vi.hoisted(() => vi.fn());
 const mockTraceFn = vi.hoisted(() => vi.fn());
+const mockScheduleMediaAttachmentUploads = vi.hoisted(() => vi.fn());
+const mockWaitForUploads = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockResetAttachments = vi.hoisted(() => vi.fn());
 
 vi.mock("opik", () => ({
   Opik: class {
@@ -52,6 +55,14 @@ vi.mock("openclaw/plugin-sdk", () => ({
       if (idx >= 0) diagnosticListeners.splice(idx, 1);
     };
   },
+}));
+
+vi.mock("./service/attachment-uploader.js", () => ({
+  createAttachmentUploader: () => ({
+    scheduleMediaAttachmentUploads: mockScheduleMediaAttachmentUploads,
+    waitForUploads: mockWaitForUploads,
+    reset: mockResetAttachments,
+  }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -261,6 +272,33 @@ describe("opik service", () => {
   // 2. llm_input hook
   // =========================================================================
   describe("llm_input hook", () => {
+    test("only schedules attachments from the latest history message", async () => {
+      const { api, hooks } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        {
+          model: "gpt-4",
+          provider: "openai",
+          prompt: "clawcon",
+          historyMessages: [
+            { role: "user", content: "Main character energy 🦉✨ media:/tmp/old-image.png" },
+            { role: "user", content: "clawcon" },
+          ],
+        },
+        agentCtx("session-1"),
+      );
+
+      expect(mockScheduleMediaAttachmentUploads).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloads: ["clawcon", { role: "user", content: "clawcon" }],
+        }),
+      );
+    });
+
     test("creates trace + LLM span with correct params", async () => {
       const { api, hooks } = createApi();
       const mockTrace = opikState.createMockTrace();
@@ -1420,6 +1458,37 @@ describe("opik service", () => {
   // 7. agent_end hook
   // =========================================================================
   describe("agent_end hook", () => {
+    test("only schedules attachments from the trailing final message", async () => {
+      const { api, hooks } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "m", provider: "p", prompt: "clawcon", historyMessages: [] },
+        agentCtx("s1"),
+      );
+      invokeHook(
+        hooks,
+        "agent_end",
+        {
+          success: true,
+          messages: [
+            { role: "user", content: "Main character energy 🦉✨ media:/tmp/old-image.png" },
+            { role: "assistant", content: "clawcon" },
+          ],
+        },
+        agentCtx("s1"),
+      );
+
+      expect(mockScheduleMediaAttachmentUploads).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          payloads: [undefined, { role: "assistant", content: "clawcon" }],
+        }),
+      );
+    });
+
     test("closes orphaned spans, merges costMeta into metadata, ends trace, flushes", async () => {
       const { api, hooks } = createApi();
       const mockToolSpan = opikState.createMockSpan();
