@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Opik } from "opik";
-import { LOCAL_ATTACHMENT_UPLOAD_MAGIC_ID } from "./constants.js";
+import {
+  ATTACHMENT_UPLOAD_PART_SIZE_BYTES,
+  LOCAL_ATTACHMENT_UPLOAD_MAGIC_ID,
+} from "./constants.js";
 import { createAttachmentUploader } from "./attachment-uploader.js";
 
 type MockAttachmentsApi = {
@@ -11,10 +14,13 @@ type MockAttachmentsApi = {
   completeMultiPartUpload: ReturnType<typeof vi.fn>;
 };
 
-async function createTempMediaFile(ext = ".png"): Promise<{ dir: string; filePath: string }> {
+async function createTempMediaFile(
+  ext = ".png",
+  contents: string | Uint8Array = "test-bytes",
+): Promise<{ dir: string; filePath: string }> {
   const dir = await mkdtemp(join(tmpdir(), "opik-attachment-uploader-"));
   const filePath = join(dir, `sample${ext}`);
-  await writeFile(filePath, "test-bytes", "utf8");
+  await writeFile(filePath, contents);
   return { dir, filePath };
 }
 
@@ -210,6 +216,50 @@ describe("attachment uploader", () => {
     await uploader.waitForUploads();
 
     expect(attachmentsApi.startMultiPartUpload).toHaveBeenCalledTimes(1);
+  });
+
+  test("uploads multipart attachments without loading the whole file into one request body", async () => {
+    const largeContents = Buffer.alloc(ATTACHMENT_UPLOAD_PART_SIZE_BYTES + 32, 0x61);
+    const { dir, filePath } = await createTempMediaFile(".png", largeContents);
+    tempDirs.push(dir);
+
+    const attachmentsApi = {
+      startMultiPartUpload: vi.fn(async () => ({
+        uploadId: "upload-1",
+        preSignUrls: ["https://upload.example.com/part-1", "https://upload.example.com/part-2"],
+      })),
+      completeMultiPartUpload: vi.fn(async () => undefined),
+    };
+    const client = { api: { attachments: attachmentsApi } };
+
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200, headers: { etag: "etag" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const uploader = createAttachmentUploader({
+      getClient: () => client as unknown as Opik,
+      getAttachmentBaseUrl: () => "https://www.comet.com/opik/api",
+      onWarn: () => undefined,
+      formatError: (err) => String(err),
+    });
+
+    uploader.scheduleMediaAttachmentUploads({
+      entityType: "trace",
+      entity: { id: "trace-1" },
+      projectName: "openclaw",
+      reason: "multipart",
+      payloads: [filePath],
+    });
+    await uploader.waitForUploads();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const fetchCalls = fetchMock.mock.calls as unknown as Array<[string, RequestInit | undefined]>;
+    const firstBody = fetchCalls[0]?.[1]?.body;
+    const secondBody = fetchCalls[1]?.[1]?.body;
+    expect(firstBody).toBeInstanceOf(Blob);
+    expect(secondBody).toBeInstanceOf(Blob);
+    expect((firstBody as Blob).size).toBe(ATTACHMENT_UPLOAD_PART_SIZE_BYTES);
+    expect((secondBody as Blob).size).toBe(32);
+    expect(attachmentsApi.completeMultiPartUpload).toHaveBeenCalledTimes(1);
   });
 
   test("skips uploads when attachment uploads are disabled", async () => {
