@@ -85,6 +85,25 @@ export function hasCostUsageFields(costMeta: ActiveTrace["costMeta"]): boolean {
   );
 }
 
+/**
+ * Derive a unique agent identifier from the session key.
+ * Session keys follow the format `agent:<scope>:<name>` (e.g. `agent:yariv:main`).
+ * Returns `<scope>/<name>` to distinguish agents with the same name but different scopes.
+ * Falls back to the raw agentId if the session key doesn't match the expected format.
+ */
+export function resolveUniqueAgentId(
+  sessionKey: string | undefined,
+  agentId: unknown,
+): string | undefined {
+  if (sessionKey) {
+    const parts = sessionKey.split(":");
+    if (parts.length >= 3 && parts[0] === "agent") {
+      return sessionKey;
+    }
+  }
+  return asNonEmptyString(agentId);
+}
+
 export function resolveToolCallId(
   event: Record<string, unknown>,
   ctx: Record<string, unknown>,

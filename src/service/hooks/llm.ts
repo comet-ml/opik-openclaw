@@ -7,6 +7,7 @@ import {
   normalizeProvider,
   resolveChannelId,
   resolveTrigger,
+  resolveUniqueAgentId,
 } from "../helpers.js";
 import { sanitizeValueForOpik } from "../payload-sanitizer.js";
 
@@ -69,7 +70,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
           model: event.model,
           sessionId: event.sessionId,
           runId: event.runId,
-          agentId: agentCtx.agentId,
+          agentId: resolveUniqueAgentId(sessionKey, agentCtx.agentId),
           ...(channelId ? { channel: channelId, channelId } : {}),
           ...(trigger ? { trigger } : {}),
         },

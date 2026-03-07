@@ -1,7 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { Opik, Span, Trace } from "opik";
 import type { ActiveTrace } from "../../types.js";
-import { asNonEmptyString, resolveRunId, resolveToolCallId } from "../helpers.js";
+import { asNonEmptyString, resolveRunId, resolveToolCallId, resolveUniqueAgentId } from "../helpers.js";
 import { sanitizeStringForOpik, sanitizeValueForOpik } from "../payload-sanitizer.js";
 
 type ToolHooksDeps = {
@@ -49,8 +49,9 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
     const toolCallId = resolveToolCallId(eventObj, ctxObj);
     const sessionId = asNonEmptyString(ctxObj.sessionId);
 
+    const uniqueAgentId = resolveUniqueAgentId(sessionKey, toolCtx.agentId);
     const spanMetadata: Record<string, unknown> = {
-      ...(toolCtx.agentId ? { agentId: toolCtx.agentId } : {}),
+      ...(uniqueAgentId ? { agentId: uniqueAgentId } : {}),
       ...(sessionId ? { sessionId } : {}),
       ...(runId ? { runId } : {}),
       ...(toolCallId ? { toolCallId } : {}),
@@ -161,9 +162,10 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
     if (event.params && typeof event.params === "object" && !Array.isArray(event.params)) {
       spanUpdate.input = sanitizeValueForOpik(event.params) as Record<string, unknown>;
     }
+    const resolvedAgentId = resolveUniqueAgentId(sessionKey, toolCtx.agentId);
     const spanMetadata: Record<string, unknown> = {
       ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
-      ...(toolCtx.agentId ? { agentId: toolCtx.agentId } : {}),
+      ...(resolvedAgentId ? { agentId: resolvedAgentId } : {}),
       ...(sessionId ? { sessionId } : {}),
       ...(runId ? { runId } : {}),
       ...(toolCallId ? { toolCallId } : {}),
