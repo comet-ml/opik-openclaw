@@ -45,6 +45,7 @@ Prerequisites:
 
 - OpenClaw `>=2026.3.2`
 - Node.js `>=22.12.0`
+- npm `>=10`
 
 ### 1. Install the plugin in OpenClaw
 
@@ -163,7 +164,7 @@ No OpenClaw core changes are included in this repository and relies on native ho
 Prerequisites:
 
 - Node.js `>=22.12.0`
-- npm `>=11`
+- npm `>=10`
 
 ```bash
 npm ci
