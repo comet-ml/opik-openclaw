@@ -1,12 +1,36 @@
-name: CI
+name: Node CI
+
+permissions:
+  contents: read
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [main]
+    paths:
+      - ".github/workflows/ci.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "index.ts"
+      - "openclaw.plugin.json"
+      - "src/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/ci.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "index.ts"
+      - "openclaw.plugin.json"
+      - "src/**"
+  workflow_dispatch:
 
 jobs:
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
