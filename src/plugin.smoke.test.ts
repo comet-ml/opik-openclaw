@@ -58,4 +58,11 @@ describe("plugin smoke", () => {
     expect(manifest.configSchema?.properties?.projectName?.type).toBe("string");
     expect(manifest.uiHints?.apiKey?.sensitive).toBe(true);
   });
+
+  test("package declares zod runtime dependency for packaged installs", () => {
+    const packageJsonPath = new URL("../package.json", import.meta.url);
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+
+    expect(packageJson.dependencies?.zod).toBeTruthy();
+  });
 });
