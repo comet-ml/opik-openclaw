@@ -26,6 +26,14 @@ function asOptionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function asOptionalTrimmedString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function asOptionalNumber(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return undefined;
@@ -44,8 +52,8 @@ export function parseOpikPluginConfig(raw: unknown): OpikPluginConfig {
     enabled: typeof cfg.enabled === "boolean" ? cfg.enabled : undefined,
     apiKey: asOptionalString(cfg.apiKey),
     apiUrl: asOptionalString(cfg.apiUrl),
-    projectName: asOptionalString(cfg.projectName),
-    workspaceName: asOptionalString(cfg.workspaceName),
+    projectName: asOptionalTrimmedString(cfg.projectName),
+    workspaceName: asOptionalTrimmedString(cfg.workspaceName),
     tags,
     toolResultPersistSanitizeEnabled:
       typeof cfg.toolResultPersistSanitizeEnabled === "boolean"
