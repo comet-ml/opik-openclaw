@@ -1,0 +1,217 @@
+name: Issue Slack Notifications
+
+on:
+  issues:
+    types: [opened, closed, reopened, labeled]
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  notify-slack:
+    name: "Slack Notification"
+    runs-on: ubuntu-latest
+    if: |
+      github.event.action != 'labeled' ||
+      contains(fromJSON('["bug", "critical", "priority:high"]'), github.event.label.name)
+
+    steps:
+      - name: "Check Slack configuration"
+        id: check-slack
+        run: |
+          if [ -z "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "::notice::SLACK_WEBHOOK_URL not configured - Slack notification will be skipped"
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "Resolve Slack mentions"
+        id: resolve-slack-mentions
+        if: steps.check-slack.outputs.configured == 'true'
+        env:
+          SLACK_USER_MAPPING: ${{ secrets.SLACK_USER_MAPPING }}
+        run: |
+          AUTHOR="${{ github.event.issue.user.login }}"
+          ASSIGNEE="${{ github.event.issue.assignee.login }}"
+
+          AUTHOR_MENTION=""
+          ASSIGNEE_MENTION=""
+
+          if [ -n "$SLACK_USER_MAPPING" ]; then
+            if [ -n "$AUTHOR" ]; then
+              AUTHOR_SLACK_ID=$(echo "$SLACK_USER_MAPPING" | jq -r --arg user "$AUTHOR" '.[$user] // empty' 2>/dev/null || echo "")
+              if [ -n "$AUTHOR_SLACK_ID" ]; then
+                AUTHOR_MENTION="<@$AUTHOR_SLACK_ID>"
+              fi
+            fi
+            if [ -n "$ASSIGNEE" ]; then
+              ASSIGNEE_SLACK_ID=$(echo "$SLACK_USER_MAPPING" | jq -r --arg user "$ASSIGNEE" '.[$user] // empty' 2>/dev/null || echo "")
+              if [ -n "$ASSIGNEE_SLACK_ID" ]; then
+                ASSIGNEE_MENTION="<@$ASSIGNEE_SLACK_ID>"
+              fi
+            fi
+          fi
+
+          echo "author_mention=$AUTHOR_MENTION" >> $GITHUB_OUTPUT
+          echo "assignee_mention=$ASSIGNEE_MENTION" >> $GITHUB_OUTPUT
+
+      - name: "Send Slack notification"
+        if: steps.check-slack.outputs.configured == 'true'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          ACTION="${{ github.event.action }}"
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          ISSUE_URL="${{ github.event.issue.html_url }}"
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          AUTHOR="${{ github.event.issue.user.login }}"
+          ASSIGNEE="${{ github.event.issue.assignee.login }}"
+          AUTHOR_MENTION="${{ steps.resolve-slack-mentions.outputs.author_mention }}"
+          ASSIGNEE_MENTION="${{ steps.resolve-slack-mentions.outputs.assignee_mention }}"
+
+          LABELS=$(echo '${{ toJSON(github.event.issue.labels.*.name) }}' | jq -r 'join(", ")' 2>/dev/null || echo "")
+
+          case "$ACTION" in
+            opened)
+              STATUS_EMOJI="🆕"
+              STATUS_TEXT="New Issue Opened"
+              COLOR="#2ea44f"
+              ;;
+            closed)
+              STATUS_EMOJI="✅"
+              STATUS_TEXT="Issue Closed"
+              COLOR="good"
+              ;;
+            reopened)
+              STATUS_EMOJI="🔄"
+              STATUS_TEXT="Issue Reopened"
+              COLOR="warning"
+              ;;
+            labeled)
+              LABEL_NAME="${{ github.event.label.name }}"
+              STATUS_EMOJI="🏷️"
+              STATUS_TEXT="Issue Labeled: $LABEL_NAME"
+              COLOR="warning"
+              ;;
+          esac
+
+          # Build fields
+          FIELDS='[
+            {
+              "type": "mrkdwn",
+              "text": "*Author:*\n'"$AUTHOR"'"
+            }'
+
+          if [ -n "$ASSIGNEE" ]; then
+            FIELDS="$FIELDS"',
+            {
+              "type": "mrkdwn",
+              "text": "*Assignee:*\n'"$ASSIGNEE"'"
+            }'
+          fi
+
+          if [ -n "$LABELS" ]; then
+            FIELDS="$FIELDS"',
+            {
+              "type": "mrkdwn",
+              "text": "*Labels:*\n`'"$LABELS"'`"
+            }'
+          fi
+
+          FIELDS="$FIELDS]"
+
+          # Build mention block for high-priority issues
+          MENTION_BLOCK=""
+          if [ "$ACTION" == "opened" ] || [ "$ACTION" == "labeled" ]; then
+            MENTIONS=""
+            if [ -n "$ASSIGNEE_MENTION" ]; then
+              MENTIONS="$ASSIGNEE_MENTION"
+            fi
+            if [ -n "$MENTIONS" ]; then
+              MENTION_BLOCK=',
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "👋 '"$MENTIONS"' — this needs your attention!"
+                  }
+                }'
+            fi
+          fi
+
+          cat << EOF > payload.json
+          {
+            "attachments": [
+              {
+                "color": "$COLOR",
+                "blocks": [
+                  {
+                    "type": "header",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "$STATUS_EMOJI $STATUS_TEXT",
+                      "emoji": true
+                    }
+                  },
+                  {
+                    "type": "section",
+                    "text": {
+                      "type": "mrkdwn",
+                      "text": "*<$ISSUE_URL|#$ISSUE_NUMBER: $ISSUE_TITLE>*"
+                    }
+                  },
+                  {
+                    "type": "section",
+                    "fields": $FIELDS
+                  }$MENTION_BLOCK,
+                  {
+                    "type": "actions",
+                    "elements": [
+                      {
+                        "type": "button",
+                        "text": {
+                          "type": "plain_text",
+                          "text": "View Issue",
+                          "emoji": true
+                        },
+                        "url": "$ISSUE_URL",
+                        "style": "primary"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H 'Content-type: application/json' \
+            --data @payload.json \
+            "$SLACK_WEBHOOK_URL")
+
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            echo "✅ Slack notification sent successfully"
+          else
+            echo "⚠️ Slack notification failed with HTTP code: $HTTP_CODE"
+          fi
+
+      - name: "Slack not configured"
+        if: steps.check-slack.outputs.configured != 'true'
+        run: |
+          echo "## Slack Notification Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Slack notifications are not configured. To enable them:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. Create a Slack Incoming Webhook for your desired channel" >> $GITHUB_STEP_SUMMARY
+          echo "2. Add the webhook URL as a repository secret named \`SLACK_WEBHOOK_URL\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Optional: Enable @mentions" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Add \`SLACK_USER_MAPPING\` as a secret with a JSON mapping of GitHub usernames to Slack user IDs:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+          echo '{"github-user": "USLACKID1", "another-user": "USLACKID2"}' >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
