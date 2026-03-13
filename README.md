@@ -61,7 +61,7 @@ If the Gateway is already running, restart it after install.
 openclaw opik configure
 ```
 
-The setup wizard validates endpoint and credentials, then writes config under `plugins.entries.opik-openclaw`.
+The setup wizard validates endpoint and credentials, then writes config under `plugins.entries.opik-openclaw`. If you choose Opik Cloud and do not have an account yet, the wizard now points you to the free signup flow before asking for an API key.
 
 ### 3. Check effective settings
 
