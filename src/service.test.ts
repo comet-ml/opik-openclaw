@@ -192,6 +192,29 @@ describe("opik service", () => {
       });
     });
 
+    test("trims project and workspace names from runtime config", async () => {
+      const { api } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(
+        createServiceContext(true, {
+          enabled: true,
+          apiKey: "my-key",
+          projectName: "  my-project  ",
+          workspaceName: "  my-workspace  ",
+        }) as any,
+      );
+
+      expect(mockOpikConstructor).toHaveBeenCalledWith({
+        apiKey: "my-key",
+        projectName: "my-project",
+        workspaceName: "my-workspace",
+      });
+      expect(mockRetrieveProject).toHaveBeenCalledWith(
+        { name: "my-project" },
+        { workspaceName: "my-workspace" },
+      );
+    });
+
     test("prefers pluginConfig over runtime service config", async () => {
       const { api } = createApi();
       const service = createOpikService(api as any, {
@@ -236,6 +259,46 @@ describe("opik service", () => {
         projectName: "env-project",
         workspaceName: "env-workspace",
       });
+    });
+
+    test("trims project and workspace names from env vars", async () => {
+      process.env.OPIK_API_KEY = "env-key";
+      process.env.OPIK_PROJECT_NAME = "  env-project  ";
+      process.env.OPIK_WORKSPACE = "  env-workspace  ";
+
+      const { api } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext(true, { enabled: true }) as any);
+
+      expect(mockOpikConstructor).toHaveBeenCalledWith({
+        apiKey: "env-key",
+        projectName: "env-project",
+        workspaceName: "env-workspace",
+      });
+      expect(mockRetrieveProject).toHaveBeenCalledWith(
+        { name: "env-project" },
+        { workspaceName: "env-workspace" },
+      );
+    });
+
+    test("falls back to defaults when trimmed env vars are empty", async () => {
+      process.env.OPIK_API_KEY = "env-key";
+      process.env.OPIK_PROJECT_NAME = "   ";
+      process.env.OPIK_WORKSPACE = "   ";
+
+      const { api } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext(true, { enabled: true }) as any);
+
+      expect(mockOpikConstructor).toHaveBeenCalledWith({
+        apiKey: "env-key",
+        projectName: "openclaw",
+        workspaceName: "default",
+      });
+      expect(mockRetrieveProject).toHaveBeenCalledWith(
+        { name: "openclaw" },
+        { workspaceName: "default" },
+      );
     });
 
     test("registers lifecycle/tool/subagent hooks + 1 diagnostic listener on start", async () => {
