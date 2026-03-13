@@ -13,6 +13,7 @@ type RegisterOpikCliParams = {
 
 /** Opik Cloud host (matches SDK's DEFAULT_HOST_URL). */
 const OPIK_CLOUD_HOST = "https://www.comet.com/";
+const OPIK_CLOUD_SIGNUP_URL = "https://www.comet.com/signup?from=llm";
 /** Default local Opik URL (matches SDK's DEFAULT_LOCAL_URL). */
 const DEFAULT_LOCAL_URL = "http://localhost:5173/";
 /** Max URL validation retries (matches SDK's MAX_URL_VALIDATION_RETRIES). */
@@ -100,6 +101,23 @@ function buildProjectsUrl(host: string, workspaceName: string): string {
   const isLocal = base.includes("localhost") || base.includes("127.0.0.1");
   const prefix = isLocal ? "" : "/opik";
   return `${base}${prefix}/${encodeURIComponent(workspaceName)}/projects`;
+}
+
+function buildApiKeysUrl(host: string): string {
+  return new URL("account-settings/apiKeys", normalizeUrl(host)).toString();
+}
+
+export function getApiKeyHelpText(
+  deployment: "cloud" | "self-hosted",
+  host: string,
+): string[] {
+  const lines = [`You can find your Opik API key here:\n${buildApiKeysUrl(host)}`];
+
+  if (deployment === "cloud") {
+    lines.push(`No Opik Cloud account yet? Sign up for a free account:\n${OPIK_CLOUD_SIGNUP_URL}`);
+  }
+
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -281,7 +299,9 @@ async function runOpikConfigure(deps: ConfigDeps): Promise<void> {
     let apiKeyValidated = false;
 
     while (!apiKeyValidated) {
-      p.log.info(`You can find your Opik API key here:\n${host}account-settings/apiKeys`);
+      for (const line of getApiKeyHelpText(deployment, host)) {
+        p.log.info(line);
+      }
 
       const keyInput = await p.password({
         message: "Enter your Opik API key:",
