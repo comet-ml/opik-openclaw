@@ -55,7 +55,7 @@ describe("configure helpers", () => {
   test("getApiKeyHelpText includes free signup guidance for cloud", () => {
     expect(getApiKeyHelpText("cloud", "https://www.comet.com/")).toEqual([
       "You can find your Opik API key here:\nhttps://www.comet.com/account-settings/apiKeys",
-      "No Opik Cloud account yet? Sign up for a free account:\nhttps://www.comet.com/signup?from=llm",
+      "No Opik Cloud account yet? Sign up for a free account:\nhttps://www.comet.com/signup?from=llm&source=openclaw",
     ]);
   });
 
