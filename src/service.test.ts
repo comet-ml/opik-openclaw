@@ -27,6 +27,7 @@ const opikState = vi.hoisted(() => {
 
 const mockOpikConstructor = vi.hoisted(() => vi.fn());
 const mockTraceFn = vi.hoisted(() => vi.fn());
+const mockRetrieveProject = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockScheduleMediaAttachmentUploads = vi.hoisted(() => vi.fn());
 const mockWaitForUploads = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockResetAttachments = vi.hoisted(() => vi.fn());
@@ -35,6 +36,7 @@ vi.mock("opik", () => ({
   Opik: class {
     trace = mockTraceFn;
     flush = mockFlush;
+    projects = { retrieveProject: mockRetrieveProject };
     constructor(opts?: unknown) {
       mockOpikConstructor(opts);
     }
@@ -143,6 +145,8 @@ describe("opik service", () => {
     opikState.resetCounter();
     diagnosticListeners.length = 0;
     mockTraceFn.mockImplementation((_opts?: unknown) => opikState.createMockTrace());
+    mockRetrieveProject.mockReset();
+    mockRetrieveProject.mockResolvedValue(undefined);
     delete process.env.OPIK_API_KEY;
     delete process.env.OPIK_URL_OVERRIDE;
     delete process.env.OPIK_PROJECT_NAME;
@@ -251,6 +255,62 @@ describe("opik service", () => {
       expect(api.on).not.toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
       expect(diagnosticListeners).toHaveLength(1);
+    });
+
+    test("validates configured project in the configured workspace on start", async () => {
+      const { api } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(
+        createServiceContext(true, {
+          enabled: true,
+          apiKey: "my-key",
+          projectName: "demo-project",
+          workspaceName: "demo-workspace",
+        }) as any,
+      );
+
+      expect(mockRetrieveProject).toHaveBeenCalledWith(
+        { name: "demo-project" },
+        { workspaceName: "demo-workspace" },
+      );
+    });
+
+    test("warns clearly when the configured project does not exist", async () => {
+      mockRetrieveProject.mockRejectedValueOnce({ statusCode: 404 });
+      const { api } = createApi();
+      const ctx = createServiceContext(true, {
+        enabled: true,
+        apiKey: "my-key",
+        projectName: "missing-project",
+        workspaceName: "demo-workspace",
+      });
+      const service = createOpikService(api as any);
+
+      await service.start(ctx as any);
+
+      expect(ctx.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('configured project "missing-project" was not found'),
+      );
+      expect(api.on).toHaveBeenCalledWith("llm_input", expect.any(Function));
+    });
+
+    test("warns clearly when the API key cannot access the configured project", async () => {
+      mockRetrieveProject.mockRejectedValueOnce({ statusCode: 403 });
+      const { api } = createApi();
+      const ctx = createServiceContext(true, {
+        enabled: true,
+        apiKey: "my-key",
+        projectName: "private-project",
+        workspaceName: "demo-workspace",
+      });
+      const service = createOpikService(api as any);
+
+      await service.start(ctx as any);
+
+      expect(ctx.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('could not access project "private-project"'),
+      );
+      expect(api.on).toHaveBeenCalledWith("llm_input", expect.any(Function));
     });
 
     test("registers tool_result_persist hook only when enabled", async () => {
