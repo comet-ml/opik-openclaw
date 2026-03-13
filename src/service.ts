@@ -297,6 +297,12 @@ export function createOpikService(
     flushQueue = flushQueue.then(() => flushWithRetry(reason)).catch(() => undefined);
   }
 
+  function trimOrUndefined(value: string | undefined): string | undefined {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
   async function validateProjectTarget(params: {
     client: unknown;
     projectName: string;
@@ -439,8 +445,9 @@ export function createOpikService(
 
       const apiKey = opikCfg.apiKey ?? process.env.OPIK_API_KEY;
       const apiUrl = opikCfg.apiUrl ?? process.env.OPIK_URL_OVERRIDE;
-      const projectName = opikCfg.projectName ?? process.env.OPIK_PROJECT_NAME ?? "openclaw";
-      const workspaceName = opikCfg.workspaceName ?? process.env.OPIK_WORKSPACE ?? "default";
+      const projectName = opikCfg.projectName ?? trimOrUndefined(process.env.OPIK_PROJECT_NAME) ?? "openclaw";
+      const workspaceName =
+        opikCfg.workspaceName ?? trimOrUndefined(process.env.OPIK_WORKSPACE) ?? "default";
       const tags = opikCfg.tags ?? ["openclaw"];
       attachmentBaseUrl = (apiUrl ?? DEFAULT_ATTACHMENT_BASE_URL).replace(/\/+$/, "");
 
