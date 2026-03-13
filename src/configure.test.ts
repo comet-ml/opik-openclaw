@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { describe, expect, test, vi } from "vitest";
 import {
   getOpikPluginEntry,
+  getApiKeyHelpText,
   registerOpikCli,
   setOpikPluginEntry,
   showOpikStatus,
@@ -49,6 +50,19 @@ describe("configure helpers", () => {
 
     expect(parsed.enabled).toBe(false);
     expect(parsed.config.projectName).toBe("project-x");
+  });
+
+  test("getApiKeyHelpText includes free signup guidance for cloud", () => {
+    expect(getApiKeyHelpText("cloud", "https://www.comet.com/")).toEqual([
+      "You can find your Opik API key here:\nhttps://www.comet.com/account-settings/apiKeys",
+      "No Opik Cloud account yet? Sign up for a free account:\nhttps://www.comet.com/signup?from=llm",
+    ]);
+  });
+
+  test("getApiKeyHelpText omits cloud signup guidance for self-hosted", () => {
+    expect(getApiKeyHelpText("self-hosted", "https://opik.example.com/")).toEqual([
+      "You can find your Opik API key here:\nhttps://opik.example.com/account-settings/apiKeys",
+    ]);
   });
 });
 
