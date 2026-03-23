@@ -50,6 +50,11 @@ Prerequisites:
 ### 1. Install the plugin in OpenClaw
 
 ```bash
+openclaw plugins install clawhub:@opik/opik-openclaw
+```
+
+And for older version of OpenClaw `<2023.3.23` you can install the npm package using:
+```bash
 openclaw plugins install @opik/opik-openclaw
 ```
 
