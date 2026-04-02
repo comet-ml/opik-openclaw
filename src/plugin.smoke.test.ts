@@ -24,6 +24,7 @@ describe("plugin smoke", () => {
       pluginConfig: { enabled: true },
       registerService,
       registerCli,
+      on: vi.fn(),
       runtime: {
         config: {
           loadConfig: () => ({}),

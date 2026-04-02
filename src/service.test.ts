@@ -166,8 +166,9 @@ describe("opik service", () => {
       const service = createOpikService(api as any);
       await service.start(createServiceContext(false) as any);
 
-      expect(api.on).not.toHaveBeenCalled();
-      expect(Object.keys(hooks)).toHaveLength(0);
+      // Hooks are registered at construction time now
+      expect(api.on).toHaveBeenCalledTimes(10);
+      expect(Object.keys(hooks)).toHaveLength(10);
       expect(mockOpikConstructor).not.toHaveBeenCalled();
     });
 
@@ -306,7 +307,7 @@ describe("opik service", () => {
       const service = createOpikService(api as any);
       await service.start(createServiceContext() as any);
 
-      expect(api.on).toHaveBeenCalledTimes(9);
+      expect(api.on).toHaveBeenCalledTimes(10);
       expect(api.on).toHaveBeenCalledWith("llm_input", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("llm_output", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("before_tool_call", expect.any(Function));
@@ -315,7 +316,7 @@ describe("opik service", () => {
       expect(api.on).toHaveBeenCalledWith("subagent_delivery_target", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_spawned", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_ended", expect.any(Function));
-      expect(api.on).not.toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
       expect(diagnosticListeners).toHaveLength(1);
     });
@@ -1737,7 +1738,7 @@ describe("opik service", () => {
       expect(result).toBeUndefined();
     });
 
-    test("is not registered when tool_result_persist sanitization is disabled", async () => {
+    test("is registered but no-ops when tool_result_persist sanitization is disabled", async () => {
       const { api, hooks } = createApi();
       const service = createOpikService(api as any);
       await service.start(
@@ -1748,7 +1749,16 @@ describe("opik service", () => {
         }) as any,
       );
 
-      expect(hooks.tool_result_persist).toBeUndefined();
+      expect(hooks.tool_result_persist).toBeDefined();
+      const result = invokeHook(
+        hooks,
+        "tool_result_persist",
+        {
+          message: { role: "tool", content: "media:/tmp/image.png" },
+        },
+        { sessionKey: "s1" },
+      );
+      expect(result).toBeUndefined();
     });
   });
 

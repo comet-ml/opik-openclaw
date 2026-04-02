@@ -43,11 +43,15 @@ type ServiceLogger = {
   warn: (message: string) => void;
 };
 
+let _sharedClient: Opik | null = null;
+let _sharedTags: string[] = ["openclaw"];
+let _sharedProjectName = "openclaw";
+let _sharedToolResultPersistSanitizeEnabled = false;
+
 export function createOpikService(
   api: OpenClawPluginApi,
   pluginConfig: OpikPluginConfig = {},
 ): OpenClawPluginService {
-  let client: Opik | null = null;
   const activeTraces = new Map<string, ActiveTrace>();
   const subagentSpanHosts = new Map<
     string,
@@ -72,7 +76,7 @@ export function createOpikService(
 
   let flushQueue: Promise<void> = Promise.resolve();
   const attachmentUploader = createAttachmentUploader({
-    getClient: () => client,
+    getClient: () => _sharedClient,
     getAttachmentBaseUrl: () => attachmentBaseUrl,
     onWarn: (message) => log.warn(message),
     formatError,
@@ -262,7 +266,7 @@ export function createOpikService(
   }
 
   async function flushWithRetry(reason: string): Promise<void> {
-    const currentClient = client;
+    const currentClient = _sharedClient;
     if (!currentClient) return;
 
     const attempts = flushRetryCount + 1;
@@ -380,6 +384,7 @@ export function createOpikService(
       created_from: OPIK_CREATED_FROM,
       ...active.costMeta,
       success: agentEnd?.success,
+      error: agentEnd?.error,
       durationMs: agentEnd?.durationMs,
       model: active.model ?? active.costMeta.model,
       provider: active.provider ?? active.costMeta.provider,
@@ -427,6 +432,131 @@ export function createOpikService(
     scheduleFlush(`trace-finalized sessionKey=${sessionKey}`);
   }
 
+  registerLlmHooks({
+    api,
+    getClient: () => _sharedClient,
+    activeTraces,
+    getTags: () => _sharedTags,
+    getProjectName: () => _sharedProjectName,
+    rememberSessionCorrelation,
+    closeActiveTrace,
+    forgetSessionCorrelation,
+    applyContextMeta,
+    safeSpanUpdate,
+    safeSpanEnd,
+    scheduleMediaAttachmentUploads: attachmentUploader.scheduleMediaAttachmentUploads,
+    warn: (message) => log.warn(message),
+    formatError,
+  });
+
+  registerToolHooks({
+    api,
+    getClient: () => _sharedClient,
+    activeTraces,
+    sessionByAgentId,
+    getLastActiveSessionKey: () => lastActiveSessionKey,
+    rememberSessionCorrelation,
+    resolveSessionSpanContainer,
+    warnMissingAfterToolSessionKey,
+    nextSpanSeq: () => ++spanSeq,
+    safeSpanUpdate,
+    safeSpanEnd,
+    scheduleMediaAttachmentUploads: attachmentUploader.scheduleMediaAttachmentUploads,
+    getProjectName: () => _sharedProjectName,
+    warn: (message) => log.warn(message),
+    formatError,
+  });
+
+  registerSubagentHooks({
+    api,
+    getClient: () => _sharedClient,
+    rememberSessionCorrelation,
+    resolveSubagentSpanContainer,
+    getSubagentSpanHost,
+    rememberSubagentSpanHost,
+    forgetSubagentSpanHost,
+    safeSpanUpdate,
+    safeSpanEnd,
+    warn: (message) => log.warn(message),
+    formatError,
+  });
+
+  // =====================================================================
+  // Hook: tool_result_persist — sanitize persisted tool messages (opt-in)
+  // =====================================================================
+  api.on("tool_result_persist", (event) => {
+    if (!_sharedToolResultPersistSanitizeEnabled) return;
+    try {
+      const eventObj = event as Record<string, unknown>;
+      const message = eventObj.message;
+      if (!message || typeof message !== "object") return;
+
+      const sanitizedMessage = sanitizeValueForOpik(message);
+      if (sanitizedMessage !== message) {
+        return { message: sanitizedMessage };
+      }
+    } catch (err) {
+      log.warn(`opik: tool_result_persist failed: ${formatError(err)}`);
+    }
+  });
+
+  // =====================================================================
+  // Hook: agent_end — Finalize Trace
+  // =====================================================================
+  api.on("agent_end", (event, agentCtx) => {
+    if (!_sharedClient) return;
+    const sessionKey = agentCtx.sessionKey;
+    if (!sessionKey) return;
+    rememberSessionCorrelation(sessionKey, agentCtx.agentId);
+
+    const active = activeTraces.get(sessionKey);
+    if (!active) return;
+
+    applyContextMeta(active, agentCtx as Record<string, unknown>);
+    // Close any orphaned tool/subagent spans synchronously.
+    for (const [toolKey, toolSpan] of active.toolSpans) {
+      safeSpanEnd(toolSpan, `agent_end orphan tool sessionKey=${sessionKey} toolKey=${toolKey}`);
+    }
+    active.toolSpans.clear();
+
+    for (const [subagentKey, subagentSpan] of active.subagentSpans) {
+      safeSpanEnd(
+        subagentSpan,
+        `agent_end orphan subagent sessionKey=${sessionKey} subagentKey=${subagentKey}`,
+      );
+    }
+    active.subagentSpans.clear();
+
+    // Store agent-end data for deferred finalization.
+    active.agentEnd = {
+      success: event.success,
+      error: typeof event.error === "string" ? sanitizeStringForOpik(event.error) : event.error,
+      durationMs: event.durationMs,
+      messages: (sanitizeValueForOpik(
+        ((event as Record<string, unknown>).messages as unknown[]) ?? [],
+      ) as unknown[]) ?? [],
+    };
+
+    attachmentUploader.scheduleMediaAttachmentUploads({
+      entityType: "trace",
+      entity: active.trace,
+      projectName: _sharedProjectName,
+      reason: `agent_end sessionKey=${sessionKey}`,
+      payloads: [
+        event.error,
+        ((event as Record<string, unknown>).messages as unknown[] | undefined)?.at(-1),
+      ],
+    });
+
+    // Defer finalization to a microtask so llm_output (which fires on the
+    // same synchronous call stack) can store output/usage first.
+    const traceRef = active.trace;
+    queueMicrotask(() => {
+      const current = activeTraces.get(sessionKey);
+      if (current && current.trace === traceRef) finalizeTrace(sessionKey);
+    });
+  });
+
   return {
     id: OPIK_PLUGIN_ID,
     async start(ctx) {
@@ -445,10 +575,11 @@ export function createOpikService(
 
       const apiKey = opikCfg.apiKey ?? process.env.OPIK_API_KEY;
       const apiUrl = opikCfg.apiUrl ?? process.env.OPIK_URL_OVERRIDE;
-      const projectName = opikCfg.projectName ?? trimOrUndefined(process.env.OPIK_PROJECT_NAME) ?? "openclaw";
+      _sharedProjectName = opikCfg.projectName ?? trimOrUndefined(process.env.OPIK_PROJECT_NAME) ?? "openclaw";
       const workspaceName =
         opikCfg.workspaceName ?? trimOrUndefined(process.env.OPIK_WORKSPACE) ?? "default";
-      const tags = opikCfg.tags ?? ["openclaw"];
+      _sharedTags = opikCfg.tags ?? ["openclaw"];
+      _sharedToolResultPersistSanitizeEnabled = opikCfg.toolResultPersistSanitizeEnabled === true;
       attachmentBaseUrl = (apiUrl ?? DEFAULT_ATTACHMENT_BASE_URL).replace(/\/+$/, "");
 
       staleTraceCleanupEnabled = opikCfg.staleTraceCleanupEnabled !== false;
@@ -466,142 +597,17 @@ export function createOpikService(
       flushRetryBaseDelayMs = asNonNegativeNumber(opikCfg.flushRetryBaseDelayMs) ??
         DEFAULT_FLUSH_RETRY_BASE_DELAY_MS;
 
-      client = new Opik({
+      _sharedClient = new Opik({
         apiKey,
         ...(apiUrl ? { apiUrl } : {}),
-        projectName,
+        projectName: _sharedProjectName,
         workspaceName,
       });
 
       await validateProjectTarget({
-        client,
-        projectName,
+        client: _sharedClient,
+        projectName: _sharedProjectName,
         workspaceName,
-      });
-
-      registerLlmHooks({
-        api,
-        getClient: () => client,
-        activeTraces,
-        tags,
-        projectName,
-        rememberSessionCorrelation,
-        closeActiveTrace,
-        forgetSessionCorrelation,
-        applyContextMeta,
-        safeSpanUpdate,
-        safeSpanEnd,
-        scheduleMediaAttachmentUploads: attachmentUploader.scheduleMediaAttachmentUploads,
-        warn: (message) => log.warn(message),
-        formatError,
-      });
-
-      registerToolHooks({
-        api,
-        getClient: () => client,
-        activeTraces,
-        sessionByAgentId,
-        getLastActiveSessionKey: () => lastActiveSessionKey,
-        rememberSessionCorrelation,
-        resolveSessionSpanContainer,
-        warnMissingAfterToolSessionKey,
-        nextSpanSeq: () => ++spanSeq,
-        safeSpanUpdate,
-        safeSpanEnd,
-        scheduleMediaAttachmentUploads: attachmentUploader.scheduleMediaAttachmentUploads,
-        projectName,
-        warn: (message) => log.warn(message),
-        formatError,
-      });
-
-      registerSubagentHooks({
-        api,
-        getClient: () => client,
-        rememberSessionCorrelation,
-        resolveSubagentSpanContainer,
-        getSubagentSpanHost,
-        rememberSubagentSpanHost,
-        forgetSubagentSpanHost,
-        safeSpanUpdate,
-        safeSpanEnd,
-        warn: (message) => log.warn(message),
-        formatError,
-      });
-
-      // =====================================================================
-      // Hook: tool_result_persist — sanitize persisted tool messages (opt-in)
-      // =====================================================================
-      if (opikCfg.toolResultPersistSanitizeEnabled === true) {
-        api.on("tool_result_persist", (event) => {
-          try {
-            const eventObj = event as Record<string, unknown>;
-            const message = eventObj.message;
-            if (!message || typeof message !== "object") return;
-
-            const sanitizedMessage = sanitizeValueForOpik(message);
-            if (sanitizedMessage !== message) {
-              return { message: sanitizedMessage };
-            }
-          } catch (err) {
-            log.warn(`opik: tool_result_persist failed: ${formatError(err)}`);
-          }
-        });
-      }
-
-      // =====================================================================
-      // Hook: agent_end — Finalize Trace
-      // =====================================================================
-      api.on("agent_end", (event, agentCtx) => {
-        const sessionKey = agentCtx.sessionKey;
-        if (!sessionKey) return;
-        rememberSessionCorrelation(sessionKey, agentCtx.agentId);
-
-        const active = activeTraces.get(sessionKey);
-        if (!active) return;
-
-        applyContextMeta(active, agentCtx as Record<string, unknown>);
-        // Close any orphaned tool/subagent spans synchronously.
-        for (const [toolKey, toolSpan] of active.toolSpans) {
-          safeSpanEnd(toolSpan, `agent_end orphan tool sessionKey=${sessionKey} toolKey=${toolKey}`);
-        }
-        active.toolSpans.clear();
-
-        for (const [subagentKey, subagentSpan] of active.subagentSpans) {
-          safeSpanEnd(
-            subagentSpan,
-            `agent_end orphan subagent sessionKey=${sessionKey} subagentKey=${subagentKey}`,
-          );
-        }
-        active.subagentSpans.clear();
-
-        // Store agent-end data for deferred finalization.
-        active.agentEnd = {
-          success: event.success,
-          error: typeof event.error === "string" ? sanitizeStringForOpik(event.error) : event.error,
-          durationMs: event.durationMs,
-          messages: (sanitizeValueForOpik(
-            ((event as Record<string, unknown>).messages as unknown[]) ?? [],
-          ) as unknown[]) ?? [],
-        };
-
-        attachmentUploader.scheduleMediaAttachmentUploads({
-          entityType: "trace",
-          entity: active.trace,
-          projectName,
-          reason: `agent_end sessionKey=${sessionKey}`,
-          payloads: [
-            event.error,
-            ((event as Record<string, unknown>).messages as unknown[] | undefined)?.at(-1),
-          ],
-        });
-
-        // Defer finalization to a microtask so llm_output (which fires on the
-        // same synchronous call stack) can store output/usage first.
-        const traceRef = active.trace;
-        queueMicrotask(() => {
-          const current = activeTraces.get(sessionKey);
-          if (current && current.trace === traceRef) finalizeTrace(sessionKey);
-        });
       });
 
       // =====================================================================
@@ -687,7 +693,7 @@ export function createOpikService(
       };
 
       log.info(
-        `opik: exporting traces to project "${projectName}" (staleCleanup=${staleTraceCleanupEnabled ? "on" : "off"}, staleTimeoutMs=${staleTraceTimeoutMs}, staleSweepMs=${staleSweepIntervalMs}, flushRetryCount=${flushRetryCount}, flushRetryBaseDelayMs=${flushRetryBaseDelayMs})`,
+        `opik: exporting traces to project "${_sharedProjectName}" (staleCleanup=${staleTraceCleanupEnabled ? "on" : "off"}, staleTimeoutMs=${staleTraceTimeoutMs}, staleSweepMs=${staleSweepIntervalMs}, flushRetryCount=${flushRetryCount}, flushRetryBaseDelayMs=${flushRetryBaseDelayMs})`,
       );
     },
 
@@ -707,9 +713,9 @@ export function createOpikService(
       await flushQueue.catch(() => undefined);
       await attachmentUploader.waitForUploads();
 
-      if (client) {
+      if (_sharedClient) {
         await flushWithRetry("service stop");
-        client = null;
+        _sharedClient = null;
       }
 
       log.info(
