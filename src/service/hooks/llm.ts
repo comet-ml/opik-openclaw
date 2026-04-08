@@ -3,6 +3,7 @@ import type { Opik, Span, Trace } from "opik";
 import type { ActiveTrace } from "../../types.js";
 import { OPIK_CREATED_FROM } from "../constants.js";
 import {
+  asNonEmptyString,
   mapUsageToOpikTokens,
   normalizeProvider,
   resolveChannelId,
@@ -14,12 +15,13 @@ type LlmHooksDeps = {
   api: OpenClawPluginApi;
   getClient: () => Opik | null;
   activeTraces: Map<string, ActiveTrace>;
-  tags: string[];
-  projectName: string;
+  getTags: () => string[];
+  getProjectName: () => string;
   rememberSessionCorrelation: (sessionKey: string, agentId?: unknown) => void;
   closeActiveTrace: (active: ActiveTrace, reason: string) => void;
   forgetSessionCorrelation: (sessionKey: string) => void;
   applyContextMeta: (active: ActiveTrace, ctx: Record<string, unknown>) => void;
+  resolveSessionKey: (ctx: Record<string, unknown>) => string | undefined;
   safeSpanUpdate: (span: Span, payload: Record<string, unknown>, reason: string) => void;
   safeSpanEnd: (span: Span, reason: string) => void;
   scheduleMediaAttachmentUploads: (params: {
@@ -36,12 +38,18 @@ type LlmHooksDeps = {
 export function registerLlmHooks(deps: LlmHooksDeps): void {
   deps.api.on("llm_input", (event, agentCtx) => {
     const client = deps.getClient();
+    const agentCtxObj = agentCtx as Record<string, unknown>;
+    const sessionKey = deps.resolveSessionKey({
+      ...agentCtxObj,
+      sessionId: asNonEmptyString(event.sessionId) ?? agentCtxObj.sessionId,
+    });
     if (!client) return;
-    const sessionKey = agentCtx.sessionKey;
-    if (!sessionKey) return;
+    if (!sessionKey) {
+      deps.warn("opik: llm_input missing sessionKey");
+      return;
+    }
     deps.rememberSessionCorrelation(sessionKey, agentCtx.agentId);
     const normalizedProvider = normalizeProvider(event.provider) ?? event.provider;
-    const agentCtxObj = agentCtx as Record<string, unknown>;
     const channelId = resolveChannelId(agentCtxObj);
     const trigger = resolveTrigger(agentCtxObj);
 
@@ -73,7 +81,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
           ...(channelId ? { channel: channelId, channelId } : {}),
           ...(trigger ? { trigger } : {}),
         },
-        tags: deps.tags.length > 0 ? deps.tags : undefined,
+        tags: deps.getTags().length > 0 ? deps.getTags() : undefined,
       });
     } catch (err) {
       deps.warn(`opik: trace creation failed (sessionKey=${sessionKey}): ${deps.formatError(err)}`);
@@ -118,21 +126,31 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
     deps.scheduleMediaAttachmentUploads({
       entityType: "trace",
       entity: trace,
-      projectName: deps.projectName,
+      projectName: deps.getProjectName(),
       reason: `llm_input sessionKey=${sessionKey}`,
       payloads: [event.prompt, Array.isArray(event.historyMessages) ? event.historyMessages.at(-1) : undefined],
     });
   });
 
   deps.api.on("llm_output", (event, agentCtx) => {
-    if (!deps.getClient()) return;
-    const sessionKey = agentCtx.sessionKey;
-    if (!sessionKey) return;
+    const client = deps.getClient();
+    const agentCtxObj = agentCtx as Record<string, unknown>;
+    const sessionKey = deps.resolveSessionKey(agentCtxObj);
+    if (!client) return;
+    if (!sessionKey) {
+      deps.warn("opik: llm_output missing sessionKey");
+      return;
+    }
     deps.rememberSessionCorrelation(sessionKey, agentCtx.agentId);
     const normalizedProvider = normalizeProvider(event.provider) ?? event.provider;
 
     const active = deps.activeTraces.get(sessionKey);
-    if (!active?.llmSpan) return;
+    if (!active?.llmSpan) {
+      deps.warn(
+        `opik: llm_output missing active llm span sessionKey=${sessionKey} hasTrace=${Boolean(active)} hasLlmSpan=${Boolean(active?.llmSpan)}`,
+      );
+      return;
+    }
 
     deps.applyContextMeta(active, agentCtx as Record<string, unknown>);
     active.lastActivityAt = Date.now();

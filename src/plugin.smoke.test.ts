@@ -2,15 +2,19 @@ import fs from "node:fs";
 import { Command } from "commander";
 import { describe, expect, test, vi } from "vitest";
 
+const emptyPluginConfigSchema = vi.hoisted(() =>
+  vi.fn(() => ({
+    jsonSchema: { type: "object", additionalProperties: false, properties: {} },
+    parse: (value: unknown) => value,
+  })),
+);
+
 vi.mock("opik", () => ({
   disableLogger: vi.fn(),
 }));
 
 vi.mock("openclaw/plugin-sdk", () => ({
-  emptyPluginConfigSchema: () => ({
-    jsonSchema: { type: "object", additionalProperties: false, properties: {} },
-    parse: (value: unknown) => value,
-  }),
+  emptyPluginConfigSchema,
 }));
 
 import plugin from "../index.js";
@@ -19,9 +23,11 @@ describe("plugin smoke", () => {
   test("registers service and CLI commands", () => {
     const registerService = vi.fn();
     const registerCli = vi.fn();
+    const on = vi.fn();
 
     plugin.register({
       pluginConfig: { enabled: true },
+      on,
       registerService,
       registerCli,
       runtime: {
@@ -34,6 +40,8 @@ describe("plugin smoke", () => {
 
     expect(registerService).toHaveBeenCalledTimes(1);
     expect(registerService.mock.calls[0]?.[0]?.id).toBe("opik-openclaw");
+    expect(on).toHaveBeenCalledWith("llm_input", expect.any(Function));
+    expect(on).toHaveBeenCalledWith("agent_end", expect.any(Function));
 
     expect(registerCli).toHaveBeenCalledTimes(1);
     expect(registerCli.mock.calls[0]?.[1]).toEqual({ commands: ["opik"] });
