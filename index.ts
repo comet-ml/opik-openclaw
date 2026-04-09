@@ -15,7 +15,11 @@ const plugin = {
   configSchema: emptyPluginConfigSchema(),
   register(api: OpenClawPluginApi) {
     const pluginConfig = parseOpikPluginConfig(api.pluginConfig);
-    api.registerService(createOpikService(api, pluginConfig));
+    api.registerService(
+      createOpikService(api, pluginConfig, {
+        registerHooksImmediately: true,
+      }),
+    );
     api.registerCli(
       ({ program }) =>
         registerOpikCli({

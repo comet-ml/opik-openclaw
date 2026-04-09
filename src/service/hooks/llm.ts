@@ -14,8 +14,8 @@ type LlmHooksDeps = {
   api: OpenClawPluginApi;
   getClient: () => Opik | null;
   activeTraces: Map<string, ActiveTrace>;
-  tags: string[];
-  projectName: string;
+  getTags: () => string[];
+  getProjectName: () => string;
   rememberSessionCorrelation: (sessionKey: string, agentId?: unknown) => void;
   closeActiveTrace: (active: ActiveTrace, reason: string) => void;
   forgetSessionCorrelation: (sessionKey: string) => void;
@@ -73,7 +73,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
           ...(channelId ? { channel: channelId, channelId } : {}),
           ...(trigger ? { trigger } : {}),
         },
-        tags: deps.tags.length > 0 ? deps.tags : undefined,
+        tags: deps.getTags().length > 0 ? deps.getTags() : undefined,
       });
     } catch (err) {
       deps.warn(`opik: trace creation failed (sessionKey=${sessionKey}): ${deps.formatError(err)}`);
@@ -118,7 +118,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
     deps.scheduleMediaAttachmentUploads({
       entityType: "trace",
       entity: trace,
-      projectName: deps.projectName,
+      projectName: deps.getProjectName(),
       reason: `llm_input sessionKey=${sessionKey}`,
       payloads: [event.prompt, Array.isArray(event.historyMessages) ? event.historyMessages.at(-1) : undefined],
     });

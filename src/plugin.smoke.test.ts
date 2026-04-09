@@ -19,9 +19,11 @@ describe("plugin smoke", () => {
   test("registers service and CLI commands", () => {
     const registerService = vi.fn();
     const registerCli = vi.fn();
+    const on = vi.fn();
 
     plugin.register({
       pluginConfig: { enabled: true },
+      on,
       registerService,
       registerCli,
       runtime: {
@@ -37,6 +39,17 @@ describe("plugin smoke", () => {
 
     expect(registerCli).toHaveBeenCalledTimes(1);
     expect(registerCli.mock.calls[0]?.[1]).toEqual({ commands: ["opik"] });
+
+    expect(on).toHaveBeenCalledWith("llm_input", expect.any(Function));
+    expect(on).toHaveBeenCalledWith("llm_output", expect.any(Function));
+    expect(on).toHaveBeenCalledWith("before_tool_call", expect.any(Function));
+    expect(on).toHaveBeenCalledWith("after_tool_call", expect.any(Function));
+    expect(on).toHaveBeenCalledWith("subagent_spawning", expect.any(Function));
+    expect(on).toHaveBeenCalledWith("subagent_delivery_target", expect.any(Function));
+    expect(on).toHaveBeenCalledWith("subagent_spawned", expect.any(Function));
+    expect(on).toHaveBeenCalledWith("subagent_ended", expect.any(Function));
+    expect(on).toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
+    expect(on).toHaveBeenCalledWith("agent_end", expect.any(Function));
 
     const registrar = registerCli.mock.calls[0]?.[0];
     const program = new Command();

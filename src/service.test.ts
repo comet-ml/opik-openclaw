@@ -306,7 +306,7 @@ describe("opik service", () => {
       const service = createOpikService(api as any);
       await service.start(createServiceContext() as any);
 
-      expect(api.on).toHaveBeenCalledTimes(9);
+      expect(api.on).toHaveBeenCalledTimes(10);
       expect(api.on).toHaveBeenCalledWith("llm_input", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("llm_output", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("before_tool_call", expect.any(Function));
@@ -315,7 +315,7 @@ describe("opik service", () => {
       expect(api.on).toHaveBeenCalledWith("subagent_delivery_target", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_spawned", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_ended", expect.any(Function));
-      expect(api.on).not.toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
       expect(diagnosticListeners).toHaveLength(1);
     });
@@ -376,18 +376,69 @@ describe("opik service", () => {
       expect(api.on).toHaveBeenCalledWith("llm_input", expect.any(Function));
     });
 
-    test("registers tool_result_persist hook only when enabled", async () => {
+    test("can register hooks immediately for runtime compatibility", () => {
       const { api } = createApi();
-      const service = createOpikService(api as any);
-      await service.start(
-        createServiceContext(true, {
+      createOpikService(api as any, {}, { registerHooksImmediately: true });
+
+      expect(api.on).toHaveBeenCalledWith("llm_input", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("llm_output", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("before_tool_call", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("after_tool_call", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("subagent_spawning", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("subagent_delivery_target", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("subagent_spawned", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("subagent_ended", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
+      expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
+    });
+
+    test("lazily initializes the Opik client for immediate hook registration", () => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      createOpikService(
+        api as any,
+        {
           enabled: true,
-          apiKey: "test-key",
-          toolResultPersistSanitizeEnabled: true,
-        }) as any,
+          apiKey: "lazy-key",
+          projectName: "lazy-project",
+          workspaceName: "lazy-workspace",
+        },
+        { registerHooksImmediately: true },
       );
 
-      expect(api.on).toHaveBeenCalledWith("tool_result_persist", expect.any(Function));
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "m", provider: "p", prompt: "hello", historyMessages: [] },
+        agentCtx("session-lazy"),
+      );
+
+      expect(mockOpikConstructor).toHaveBeenCalledWith({
+        apiKey: "lazy-key",
+        projectName: "lazy-project",
+        workspaceName: "lazy-workspace",
+      });
+      expect(mockTraceFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: "session-lazy",
+        }),
+      );
+    });
+
+    test("returns undefined from tool_result_persist when sanitizing is disabled", async () => {
+      const { api } = createApi();
+      const hooks = new Map<string, Function>();
+      api.on.mockImplementation((name: string, handler: Function) => {
+        hooks.set(name, handler);
+      });
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext(true, { enabled: true, apiKey: "test-key" }) as any);
+
+      const toolResultPersist = hooks.get("tool_result_persist");
+      expect(toolResultPersist).toEqual(expect.any(Function));
+      expect(toolResultPersist?.({ message: { role: "tool", content: "ok" } })).toBeUndefined();
     });
   });
 
@@ -1737,7 +1788,7 @@ describe("opik service", () => {
       expect(result).toBeUndefined();
     });
 
-    test("is not registered when tool_result_persist sanitization is disabled", async () => {
+    test("returns undefined when tool_result_persist sanitization is disabled", async () => {
       const { api, hooks } = createApi();
       const service = createOpikService(api as any);
       await service.start(
@@ -1748,7 +1799,18 @@ describe("opik service", () => {
         }) as any,
       );
 
-      expect(hooks.tool_result_persist).toBeUndefined();
+      expect(hooks.tool_result_persist).toEqual(expect.any(Function));
+      expect(
+        hooks.tool_result_persist?.(
+          {
+            message: {
+              role: "tool",
+              content: "plain text",
+            },
+          },
+          { sessionKey: "s1", agentId: "agent-1" },
+        ),
+      ).toBeUndefined();
     });
   });
 
