@@ -77,7 +77,7 @@ jobs:
             "gateway": {
               "mode": "local",
               "bind": "loopback",
-              "auth": { "mode": "none" },
+              "auth": { "mode": "token", "token": "e2e-test-token" },
               "port": 18789
             },
             "agents": {
@@ -109,6 +109,19 @@ jobs:
                   }
                 }
               }
+            }
+          }
+          EOF
+
+      - name: Write agent auth credentials
+        run: |
+          mkdir -p ~/.openclaw/agents/main/agent
+          cat > ~/.openclaw/agents/main/agent/auth-profiles.json << 'EOF'
+          {
+            "openai:default": {
+              "provider": "openai",
+              "mode": "api_key",
+              "apiKey": "mock-key"
             }
           }
           EOF
@@ -152,6 +165,8 @@ jobs:
       - name: Run agent turn
         run: openclaw agent --agent main --message "ping" --deliver
         timeout-minutes: 2
+        env:
+          OPENCLAW_GATEWAY_TOKEN: e2e-test-token
 
       - name: Stop gateway and flush traces
         run: |
