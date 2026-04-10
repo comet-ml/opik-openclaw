@@ -77,25 +77,21 @@ jobs:
             "gateway": {
               "mode": "local",
               "bind": "loopback",
-              "auth": "none",
+              "auth": { "mode": "none" },
               "port": 18789
             },
             "models": {
               "providers": {
                 "openai": {
-                  "apiUrl": "http://127.0.0.1:18790/v1",
-                  "apiKey": "mock-key"
+                  "baseUrl": "http://127.0.0.1:18790/v1",
+                  "apiKey": "mock-key",
+                  "models": ["gpt-4o-mini"]
                 }
-              },
-              "defaults": {
-                "provider": "openai",
-                "model": "gpt-4o-mini"
               }
             },
             "agents": {
               "defaults": {
-                "model": "gpt-4o-mini",
-                "provider": "openai"
+                "model": "gpt-4o-mini"
               }
             },
             "plugins": {
