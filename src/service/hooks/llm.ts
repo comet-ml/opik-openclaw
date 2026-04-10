@@ -61,6 +61,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
       }) as Record<string, unknown>;
       trace = client.trace({
         name: `${event.model} · ${channelId ?? "unknown"}`,
+        projectName: deps.projectName,
         threadId: sessionKey,
         input: sanitizedTraceInput,
         metadata: {
