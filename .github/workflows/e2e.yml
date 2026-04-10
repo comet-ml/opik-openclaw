@@ -55,7 +55,7 @@ jobs:
           cache: "npm"
 
       - name: Setup npm
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.6.2
 
       - name: Install OpenClaw (${{ matrix.openclaw-version }})
         run: npm install -g openclaw@${{ matrix.openclaw-version }}
