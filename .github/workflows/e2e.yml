@@ -51,11 +51,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: "22.12.0"
+          node-version: "22.x"
           cache: "npm"
 
       - name: Setup npm
-        run: npm install -g npm@11.6.2
+        run: npm install -g npm@latest
 
       - name: Install OpenClaw (${{ matrix.openclaw-version }})
         run: npm install -g openclaw@${{ matrix.openclaw-version }}
