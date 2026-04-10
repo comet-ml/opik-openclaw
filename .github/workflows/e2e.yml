@@ -85,7 +85,7 @@ jobs:
                 "openai": {
                   "baseUrl": "http://127.0.0.1:18790/v1",
                   "apiKey": "mock-key",
-                  "models": [{ "id": "gpt-4o-mini" }]
+                  "models": [{ "name": "gpt-4o-mini" }]
                 }
               }
             },
