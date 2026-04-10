@@ -57,6 +57,17 @@ jobs:
       - name: Setup npm
         run: npm install -g npm@11.6.2
 
+      - name: Setup npm global prefix for caching
+        run: |
+          npm config set prefix ~/.npm-global
+          echo "$HOME/.npm-global/bin" >> $GITHUB_PATH
+
+      - name: Cache OpenClaw install
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm-global
+          key: openclaw-${{ matrix.openclaw-version }}-${{ runner.os }}-${{ runner.arch }}
+
       - name: Install OpenClaw (${{ matrix.openclaw-version }})
         run: npm install -g openclaw@${{ matrix.openclaw-version }}
 
