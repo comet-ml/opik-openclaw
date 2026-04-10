@@ -28,6 +28,8 @@ on:
       - "src/**"
       - "scripts/**"
       - "package.json"
+  schedule:
+    - cron: '0 6 * * *'  # daily at 6am UTC — catches new OpenClaw releases breaking the plugin
   workflow_dispatch:
 
 jobs:
