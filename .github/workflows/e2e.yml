@@ -150,7 +150,7 @@ jobs:
           openclaw health
 
       - name: Run agent turn
-        run: openclaw agent --message "ping" --deliver
+        run: openclaw agent --agent main --message "ping" --deliver
         timeout-minutes: 2
 
       - name: Stop gateway and flush traces
