@@ -1,0 +1,176 @@
+name: E2E Integration
+
+# Validates that the plugin works end-to-end against the latest published
+# OpenClaw release. Installs OpenClaw fresh, builds and installs the plugin
+# from source, starts the gateway with a mock LLM + mock Opik server, runs
+# a real agent turn, and asserts that traces and spans were exported.
+#
+# This catches regressions caused by OpenClaw plugin lifecycle changes that
+# unit tests cannot detect.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/e2e.yml"
+      - "index.ts"
+      - "src/**"
+      - "scripts/**"
+      - "package.json"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/e2e.yml"
+      - "index.ts"
+      - "src/**"
+      - "scripts/**"
+      - "package.json"
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: E2E against OpenClaw ${{ matrix.openclaw-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        openclaw-version:
+          - latest
+
+    steps:
+      - name: Checkout plugin source
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22.12.0"
+          cache: "npm"
+
+      - name: Setup npm
+        run: npm install -g npm@11.6.2
+
+      - name: Install OpenClaw (${{ matrix.openclaw-version }})
+        run: npm install -g openclaw@${{ matrix.openclaw-version }}
+
+      - name: Print OpenClaw version
+        run: openclaw --version
+
+      - name: Install plugin dependencies
+        run: npm ci
+
+      - name: Build plugin tarball
+        run: npm pack
+
+      - name: Write OpenClaw config
+        run: |
+          mkdir -p ~/.openclaw/agents/main/sessions
+          cat > ~/.openclaw/openclaw.json << 'EOF'
+          {
+            "gateway": {
+              "mode": "local",
+              "bind": "loopback",
+              "auth": "none",
+              "port": 18789
+            },
+            "models": {
+              "providers": {
+                "openai": {
+                  "apiUrl": "http://127.0.0.1:18790/v1",
+                  "apiKey": "mock-key"
+                }
+              },
+              "defaults": {
+                "provider": "openai",
+                "model": "gpt-4o-mini"
+              }
+            },
+            "agents": {
+              "defaults": {
+                "model": "gpt-4o-mini",
+                "provider": "openai"
+              }
+            },
+            "plugins": {
+              "allow": ["opik-openclaw"],
+              "entries": {
+                "opik-openclaw": {
+                  "enabled": true,
+                  "config": {
+                    "enabled": true,
+                    "apiUrl": "http://127.0.0.1:18791",
+                    "apiKey": "mock-key",
+                    "projectName": "e2e-test",
+                    "workspaceName": "default"
+                  }
+                }
+              }
+            }
+          }
+          EOF
+
+      - name: Install plugin from tarball
+        run: openclaw plugins install ./opik-opik-openclaw-*.tgz
+
+      - name: Start mock Opik server
+        run: node scripts/mock-opik-server.mjs &
+        env:
+          MOCK_OPIK_PORT: "18791"
+          E2E_RESULT_FILE: e2e-result.json
+
+      - name: Start mock LLM server
+        run: node scripts/mock-llm-server.mjs &
+        env:
+          MOCK_LLM_PORT: "18790"
+
+      - name: Wait for mock servers to be ready
+        run: |
+          for i in $(seq 1 10); do
+            curl -sf http://127.0.0.1:18791/health > /dev/null 2>&1 && \
+            curl -sf http://127.0.0.1:18790/v1/models > /dev/null 2>&1 && break
+            sleep 1
+          done
+
+      - name: Start OpenClaw gateway
+        run: openclaw gateway run &
+
+      - name: Wait for gateway to be ready
+        run: |
+          for i in $(seq 1 15); do
+            openclaw health > /dev/null 2>&1 && break
+            sleep 1
+          done
+          openclaw health
+
+      - name: Run agent turn
+        run: openclaw agent --message "ping" --deliver
+        timeout-minutes: 2
+
+      - name: Stop gateway and flush traces
+        run: |
+          openclaw gateway stop || true
+          sleep 2
+
+      - name: Stop mock servers and collect results
+        run: |
+          pkill -f mock-opik-server.mjs || true
+          pkill -f mock-llm-server.mjs || true
+          sleep 1
+
+      - name: Assert traces and spans were exported
+        run: node scripts/check-e2e-result.mjs
+        env:
+          E2E_RESULT_FILE: e2e-result.json
+
+      - name: Upload E2E result on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-result
+          path: e2e-result.json
+          if-no-files-found: ignore
