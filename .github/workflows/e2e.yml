@@ -91,9 +91,7 @@ jobs:
               "profiles": {
                 "openai:default": {
                   "provider": "openai",
-                  "mode": "api_key",
-                  "apiUrl": "http://127.0.0.1:18790/v1",
-                  "apiKey": "mock-key"
+                  "mode": "api_key"
                 }
               }
             },
@@ -139,6 +137,9 @@ jobs:
 
       - name: Start OpenClaw gateway
         run: openclaw gateway run &
+        env:
+          OPENAI_API_KEY: mock-key
+          OPENAI_BASE_URL: http://127.0.0.1:18790/v1
 
       - name: Wait for gateway to be ready
         run: |
