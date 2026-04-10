@@ -44,6 +44,11 @@ jobs:
         openclaw-version:
           - latest
 
+    env:
+      OPENCLAW_GATEWAY_TOKEN: e2e-test-token
+      OPENAI_API_KEY: mock-key
+      OPENAI_BASE_URL: http://127.0.0.1:18790/v1
+
     steps:
       - name: Checkout plugin source
         uses: actions/checkout@v5
@@ -161,9 +166,6 @@ jobs:
 
       - name: Start OpenClaw gateway
         run: openclaw gateway run &
-        env:
-          OPENAI_API_KEY: mock-key
-          OPENAI_BASE_URL: http://127.0.0.1:18790/v1
 
       - name: Wait for gateway to be ready
         run: |
@@ -176,8 +178,6 @@ jobs:
       - name: Run agent turn
         run: openclaw agent --agent main --message "ping" --deliver
         timeout-minutes: 2
-        env:
-          OPENCLAW_GATEWAY_TOKEN: e2e-test-token
 
       - name: Stop gateway and flush traces
         run: |
