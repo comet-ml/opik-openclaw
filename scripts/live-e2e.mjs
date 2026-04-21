@@ -11,24 +11,54 @@ import { Opik } from "opik";
 const ROOT_DIR = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const hostHomeDir = process.env.HOME ?? "";
 const hostOpenClawConfigPath = path.join(hostHomeDir, ".openclaw", "openclaw.json");
-const hostOpenClawConfig = await readJsonIfExists(hostOpenClawConfigPath);
-const hostOpikPluginConfig = hostOpenClawConfig?.plugins?.entries?.["opik-openclaw"]?.config;
+const useHostOpikConfig = process.env.OPENCLAW_LIVE_USE_HOST_OPIK_CONFIG !== "0";
+const hostOpenClawConfig = useHostOpikConfig ? await readJsonIfExists(hostOpenClawConfigPath) : null;
+const hostOpikPluginConfig = hostOpenClawConfig?.plugins?.entries?.["opik-openclaw"]?.config ?? null;
 
 const openAiApiKey = process.env.OPENAI_API_KEY?.trim();
-const opikApiKey = process.env.OPIK_API_KEY?.trim() ?? trimOrUndefined(hostOpikPluginConfig?.apiKey);
-const opikApiUrl =
-  process.env.OPIK_URL_OVERRIDE?.trim() ?? trimOrUndefined(hostOpikPluginConfig?.apiUrl);
+const opikApiKeyResolution = resolveConfigValue({
+  envKey: "OPIK_API_KEY",
+  envValue: process.env.OPIK_API_KEY,
+  fallbackValue: trimOrUndefined(hostOpikPluginConfig?.apiKey),
+  fallbackSource: hostOpenClawConfigPath,
+});
+const opikApiUrlResolution = resolveConfigValue({
+  envKey: "OPIK_URL_OVERRIDE",
+  envValue: process.env.OPIK_URL_OVERRIDE,
+  fallbackValue: trimOrUndefined(hostOpikPluginConfig?.apiUrl),
+  fallbackSource: hostOpenClawConfigPath,
+});
+const opikProjectResolution = resolveConfigValue({
+  envKey: "OPIK_PROJECT_NAME",
+  envValue: process.env.OPIK_PROJECT_NAME,
+  fallbackValue: trimOrUndefined(hostOpikPluginConfig?.projectName),
+  fallbackSource: hostOpenClawConfigPath,
+});
+const opikWorkspaceResolution = resolveConfigValue({
+  envKey: "OPIK_WORKSPACE",
+  envValue: process.env.OPIK_WORKSPACE,
+  fallbackValue: trimOrUndefined(hostOpikPluginConfig?.workspaceName),
+  fallbackSource: hostOpenClawConfigPath,
+});
+const opikApiKey = opikApiKeyResolution.value;
+const opikApiUrl = opikApiUrlResolution.value;
 
 const missingRequirements = [];
 if (!openAiApiKey) {
   missingRequirements.push("OPENAI_API_KEY");
 }
 if (!opikApiKey) {
-  missingRequirements.push("OPIK_API_KEY or ~/.openclaw/openclaw.json plugins.entries.opik-openclaw.config.apiKey");
+  missingRequirements.push(
+    useHostOpikConfig
+      ? "OPIK_API_KEY or ~/.openclaw/openclaw.json plugins.entries.opik-openclaw.config.apiKey"
+      : "OPIK_API_KEY",
+  );
 }
 if (!opikApiUrl) {
   missingRequirements.push(
-    "OPIK_URL_OVERRIDE or ~/.openclaw/openclaw.json plugins.entries.opik-openclaw.config.apiUrl",
+    useHostOpikConfig
+      ? "OPIK_URL_OVERRIDE or ~/.openclaw/openclaw.json plugins.entries.opik-openclaw.config.apiUrl"
+      : "OPIK_URL_OVERRIDE",
   );
 }
 if (missingRequirements.length > 0) {
@@ -51,14 +81,8 @@ const spansPath = path.join(artifactDir, "opik-spans.json");
 
 const gatewayPort = Number.parseInt(process.env.OPENCLAW_LIVE_GATEWAY_PORT ?? "18789", 10);
 const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN?.trim() || `live-${randomUUID()}`;
-const opikProjectName =
-  process.env.OPIK_PROJECT_NAME?.trim() ??
-  trimOrUndefined(hostOpikPluginConfig?.projectName) ??
-  "openclaw";
-const opikWorkspaceName =
-  process.env.OPIK_WORKSPACE?.trim() ??
-  trimOrUndefined(hostOpikPluginConfig?.workspaceName) ??
-  "default";
+const opikProjectName = opikProjectResolution.value ?? "openclaw";
+const opikWorkspaceName = opikWorkspaceResolution.value ?? "default";
 const liveModel = process.env.OPENCLAW_LIVE_MODEL?.trim() || "gpt-4o-mini";
 const requestedOpenClawVersion = process.env.OPENCLAW_LIVE_OPENCLAW_VERSION?.trim() || "2026.4.15";
 const promptToken = `token-${randomUUID().slice(0, 8)}`;
@@ -82,6 +106,9 @@ await writeOpenClawConfig({ enablePlugin: false });
 let gatewayProcess;
 
 try {
+  console.log(
+    `[live-e2e] config sources: opikApiKey=${opikApiKeyResolution.source}, opikApiUrl=${opikApiUrlResolution.source}, project=${opikProjectResolution.source}, workspace=${opikWorkspaceResolution.source}`,
+  );
   await runCommand(["plugins", "install", pluginTarballPath], {
     env: openclawEnv,
     name: "openclaw plugins install",
@@ -293,6 +320,17 @@ function serializedContains(value, token) {
     return false;
   }
   return JSON.stringify(value).includes(token);
+}
+
+function resolveConfigValue(params) {
+  const envValue = trimOrUndefined(params.envValue);
+  if (envValue) {
+    return { value: envValue, source: `env:${params.envKey}` };
+  }
+  if (params.fallbackValue) {
+    return { value: params.fallbackValue, source: params.fallbackSource };
+  }
+  return { value: undefined, source: "unset" };
 }
 
 async function readJsonIfExists(file) {
