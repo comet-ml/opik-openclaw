@@ -40,6 +40,8 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
     const container = deps.resolveSessionSpanContainer(sessionKey);
     if (!container) return;
     const active = container.active;
+    const toolParent =
+      container.sessionKey === sessionKey && active.llmSpan ? active.llmSpan : container.parent;
 
     active.lastActivityAt = Date.now();
 
@@ -58,7 +60,7 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
 
     let toolSpan: Span;
     try {
-      toolSpan = container.parent.span({
+      toolSpan = toolParent.span({
         name: event.toolName,
         type: "tool",
         input: sanitizeValueForOpik(event.params) as any,

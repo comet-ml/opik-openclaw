@@ -612,9 +612,11 @@ describe("opik service", () => {
 
     test("closes existing trace for same sessionKey before creating new one", async () => {
       const { api, hooks } = createApi();
-      const firstTrace = opikState.createMockTrace();
-      const secondTrace = opikState.createMockTrace();
-      mockTraceFn.mockReturnValueOnce(firstTrace).mockReturnValueOnce(secondTrace);
+      const mockTrace = opikState.createMockTrace();
+      const firstLlmSpan = opikState.createMockSpan();
+      const secondLlmSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(firstLlmSpan).mockReturnValueOnce(secondLlmSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
       await service.start(createServiceContext() as any);
@@ -622,8 +624,9 @@ describe("opik service", () => {
       invokeHook(hooks, "llm_input", { model: "m1", provider: "p", prompt: "" }, agentCtx("s1"));
       invokeHook(hooks, "llm_input", { model: "m2", provider: "p", prompt: "" }, agentCtx("s1"));
 
-      expect(firstTrace.end).toHaveBeenCalled();
-      expect(mockTraceFn).toHaveBeenCalledTimes(2);
+      expect(mockTrace.end).not.toHaveBeenCalled();
+      expect(mockTraceFn).toHaveBeenCalledTimes(1);
+      expect(mockTrace.span).toHaveBeenCalledTimes(2);
     });
 
     test("no-ops when sessionKey is missing", async () => {
@@ -846,9 +849,13 @@ describe("opik service", () => {
   // 4. before_tool_call hook
   // =========================================================================
   describe("before_tool_call hook", () => {
-    test("creates tool span on active trace with correct params", async () => {
+    test("creates tool span under the active llm span with correct params", async () => {
       const { api, hooks } = createApi();
       const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockToolSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -865,7 +872,7 @@ describe("opik service", () => {
         toolCtx("s1"),
       );
 
-      expect(mockTrace.span).toHaveBeenCalledWith(
+      expect(mockLlmSpan.span).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "web_search",
           type: "tool",
@@ -899,7 +906,8 @@ describe("opik service", () => {
       const mockTrace = opikState.createMockTrace();
       const mockLlmSpan = opikState.createMockSpan();
       const mockToolSpan = opikState.createMockSpan();
-      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -918,8 +926,7 @@ describe("opik service", () => {
         toolCtx("s1", { sessionId: "ephemeral-1", agentId: "agent-7" }),
       );
 
-      expect(mockTrace.span).toHaveBeenNthCalledWith(
-        2,
+      expect(mockLlmSpan.span).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "web_search",
           type: "tool",
@@ -945,7 +952,8 @@ describe("opik service", () => {
       const mockTrace = opikState.createMockTrace();
       // First span call is for LLM, second is for tool
       const mockLlmSpan = opikState.createMockSpan();
-      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -972,7 +980,8 @@ describe("opik service", () => {
       const mockToolSpan = opikState.createMockSpan();
       const mockTrace = opikState.createMockTrace();
       const mockLlmSpan = opikState.createMockSpan();
-      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -1008,7 +1017,8 @@ describe("opik service", () => {
       const mockToolSpan = opikState.createMockSpan();
       const mockTrace = opikState.createMockTrace();
       const mockLlmSpan = opikState.createMockSpan();
-      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -1037,7 +1047,8 @@ describe("opik service", () => {
       const mockToolSpan = opikState.createMockSpan();
       const mockTrace = opikState.createMockTrace();
       const mockLlmSpan = opikState.createMockSpan();
-      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -1080,7 +1091,8 @@ describe("opik service", () => {
       const mockToolSpan = opikState.createMockSpan();
       const mockTrace = opikState.createMockTrace();
       const mockLlmSpan = opikState.createMockSpan();
-      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -1106,7 +1118,8 @@ describe("opik service", () => {
       const mockToolSpan = opikState.createMockSpan();
       const mockTrace = opikState.createMockTrace();
       const mockLlmSpan = opikState.createMockSpan();
-      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -1166,7 +1179,8 @@ describe("opik service", () => {
       const mockToolSpan = opikState.createMockSpan();
       const mockTrace = opikState.createMockTrace();
       const mockLlmSpan = opikState.createMockSpan();
-      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -1200,10 +1214,8 @@ describe("opik service", () => {
       const mockToolSpanB = opikState.createMockSpan();
       const mockTrace = opikState.createMockTrace();
       const mockLlmSpan = opikState.createMockSpan();
-      mockTrace.span
-        .mockReturnValueOnce(mockLlmSpan)
-        .mockReturnValueOnce(mockToolSpanA)
-        .mockReturnValueOnce(mockToolSpanB);
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpanA).mockReturnValueOnce(mockToolSpanB);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -1371,8 +1383,10 @@ describe("opik service", () => {
       const llmSpanB = opikState.createMockSpan();
       const toolSpanB = opikState.createMockSpan();
 
-      traceA.span.mockReturnValueOnce(llmSpanA).mockReturnValueOnce(toolSpanA);
-      traceB.span.mockReturnValueOnce(llmSpanB).mockReturnValueOnce(toolSpanB);
+      traceA.span.mockReturnValueOnce(llmSpanA);
+      llmSpanA.span.mockReturnValueOnce(toolSpanA);
+      traceB.span.mockReturnValueOnce(llmSpanB);
+      llmSpanB.span.mockReturnValueOnce(toolSpanB);
       mockTraceFn.mockReturnValueOnce(traceA).mockReturnValueOnce(traceB);
 
       const service = createOpikService(api as any);
@@ -1804,7 +1818,8 @@ describe("opik service", () => {
       const mockToolSpan = opikState.createMockSpan();
       const mockLlmSpan = opikState.createMockSpan();
       const mockTrace = opikState.createMockTrace();
-      mockTrace.span.mockReturnValueOnce(mockLlmSpan).mockReturnValueOnce(mockToolSpan);
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
