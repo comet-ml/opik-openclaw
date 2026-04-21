@@ -60,15 +60,15 @@ jobs:
       - name: Run smoke tests
         run: npm run smoke
 
-      # - name: Run E2E tests
-      #   if: ${{ secrets.OPIK_API_KEY != '' }}
+      # - name: Run live gateway E2E
+      #   if: ${{ secrets.OPIK_API_KEY != '' && secrets.OPENAI_API_KEY != '' }}
       #   env:
-      #     OPIK_E2E: "1"
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       #     OPIK_API_KEY: ${{ secrets.OPIK_API_KEY }}
       #     OPIK_URL_OVERRIDE: ${{ secrets.OPIK_URL_OVERRIDE || 'https://www.comet.com/opik/api' }}
       #     OPIK_PROJECT_NAME: ${{ secrets.OPIK_PROJECT_NAME || 'openclaw' }}
       #     OPIK_WORKSPACE: ${{ secrets.OPIK_WORKSPACE || 'default' }}
-      #   run: npm run test:e2e
+      #   run: npm run test:live
 
       - name: Verify package payload
         run: npm pack --dry-run
