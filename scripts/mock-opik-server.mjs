@@ -20,6 +20,8 @@ const RESULT_FILE = process.env.E2E_RESULT_FILE ?? "e2e-result.json";
 const received = {
   traces: 0,
   spans: 0,
+  endedTraces: 0,
+  endedSpans: 0,
   tracePatches: 0,
   spanPatches: 0,
   requests: [],
@@ -30,9 +32,13 @@ function record(method, url, body) {
   received.requests.push({ method, url, bodyLength: JSON.stringify(body).length });
 
   if (method === "POST" && url.includes("/traces/batch")) {
-    received.traces += (body?.traces ?? []).length;
+    const traces = body?.traces ?? [];
+    received.traces += traces.length;
+    received.endedTraces += traces.filter((trace) => trace?.endTime !== undefined).length;
   } else if (method === "POST" && url.includes("/spans/batch")) {
-    received.spans += (body?.spans ?? []).length;
+    const spans = body?.spans ?? [];
+    received.spans += spans.length;
+    received.endedSpans += spans.filter((span) => span?.endTime !== undefined).length;
   } else if (method === "PATCH" && url.match(/\/traces\/[^/]+$/)) {
     received.tracePatches += 1;
   } else if (method === "PATCH" && url.match(/\/spans\/[^/]+$/)) {
@@ -80,6 +86,8 @@ function writeResult() {
   const summary = {
     traces: received.traces,
     spans: received.spans,
+    endedTraces: received.endedTraces,
+    endedSpans: received.endedSpans,
     tracePatches: received.tracePatches,
     spanPatches: received.spanPatches,
     totalRequests: received.requests.length,

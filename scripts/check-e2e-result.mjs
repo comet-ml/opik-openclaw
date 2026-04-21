@@ -29,6 +29,8 @@ console.log("[check-e2e] llm result:", llmResult);
 
 const failures = [];
 const llmGenerationRequests = (llmResult.responses ?? 0) + (llmResult.chatCompletions ?? 0);
+const traceFinalizations = (result.tracePatches ?? 0) + (result.endedTraces ?? 0);
+const spanFinalizations = (result.spanPatches ?? 0) + (result.endedSpans ?? 0);
 
 if (result.traces < 1) {
   failures.push(`Expected ≥1 trace batch, got ${result.traces}`);
@@ -38,12 +40,16 @@ if (result.spans < 1) {
   failures.push(`Expected ≥1 span batch, got ${result.spans}`);
 }
 
-if (result.tracePatches < 1) {
-  failures.push(`Expected ≥1 trace patch, got ${result.tracePatches}`);
+if (traceFinalizations < 1) {
+  failures.push(
+    `Expected ≥1 finalized trace (patch or batch endTime), got patches=${result.tracePatches ?? 0} ended=${result.endedTraces ?? 0}`,
+  );
 }
 
-if (result.spanPatches < 1) {
-  failures.push(`Expected ≥1 span patch, got ${result.spanPatches}`);
+if (spanFinalizations < 1) {
+  failures.push(
+    `Expected ≥1 finalized span (patch or batch endTime), got patches=${result.spanPatches ?? 0} ended=${result.endedSpans ?? 0}`,
+  );
 }
 
 if (result.totalRequests < 1) {
