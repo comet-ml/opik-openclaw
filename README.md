@@ -179,6 +179,23 @@ npm run test
 npm run smoke
 ```
 
+Optional live gateway E2E:
+
+```bash
+npm run test:live
+```
+
+Notes:
+
+- uses an isolated `.artifacts/live-e2e/<run-id>/home/.openclaw` so it does not touch your normal OpenClaw config
+- `OPIK_API_KEY`, `OPIK_URL_OVERRIDE`, `OPIK_PROJECT_NAME`, and `OPIK_WORKSPACE` win if set in env
+- otherwise it reuses `~/.openclaw/openclaw.json -> plugins.entries.opik-openclaw.config` for `apiUrl` / `apiKey` / project / workspace
+- set `OPENCLAW_LIVE_USE_HOST_OPIK_CONFIG=0` to disable reading host plugin config and require explicit env-only Opik settings
+- still requires `OPENAI_API_KEY` in env for the real model call
+- packs and installs the current plugin build into a fresh OpenClaw home
+- falls back to `npx openclaw@${OPENCLAW_LIVE_OPENCLAW_VERSION:-2026.4.15}` when `openclaw` is not already on your `PATH`
+- override the live model with `OPENCLAW_LIVE_MODEL` if `gpt-4o-mini` is not what you want to exercise
+
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
