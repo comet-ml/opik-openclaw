@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.0.1",
-    "opik": "^1.10.25",
+    "opik": "^2.0.9",
     "zod": "^4.3.6"
   },
   "peerDependencies": {
