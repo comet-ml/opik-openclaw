@@ -47,6 +47,8 @@ jobs:
     env:
       E2E_RESULT_FILE: e2e-result.json
       E2E_LLM_RESULT_FILE: e2e-llm-result.json
+      E2E_OPIK_JOURNAL_FILE: e2e-opik-journal.json
+      E2E_LLM_JOURNAL_FILE: e2e-llm-journal.json
       OPENCLAW_GATEWAY_TOKEN: e2e-test-token
 
     steps:
@@ -246,6 +248,8 @@ jobs:
           path: |
             e2e-result.json
             e2e-llm-result.json
+            e2e-opik-journal.json
+            e2e-llm-journal.json
             agent-output.log
             gateway.log
             mock-opik.log

@@ -16,6 +16,7 @@ import path from "node:path";
 
 const PORT = parseInt(process.env.MOCK_OPIK_PORT ?? "18791", 10);
 const RESULT_FILE = process.env.E2E_RESULT_FILE ?? "e2e-result.json";
+const JOURNAL_FILE = process.env.E2E_OPIK_JOURNAL_FILE ?? "e2e-opik-journal.json";
 
 const received = {
   traces: 0,
@@ -27,9 +28,66 @@ const received = {
   requests: [],
 };
 
-function record(method, url, body) {
+function redactHeaders(headers) {
+  const entries = Object.entries(headers ?? {});
+  return Object.fromEntries(
+    entries.map(([key, value]) => {
+      if (key.toLowerCase() === "authorization") {
+        return [key, "<redacted>"];
+      }
+      return [key, value];
+    }),
+  );
+}
+
+function buildRequestSummary(method, url, body) {
+  if (method === "POST" && url.includes("/traces/batch")) {
+    const traces = body?.traces ?? [];
+    return {
+      route: "traces-batch",
+      traceCount: traces.length,
+      finalizedTraceCount: traces.filter(
+        (trace) => trace?.endTime !== undefined || trace?.end_time !== undefined,
+      ).length,
+      traceIds: traces.map((trace) => trace?.id).filter(Boolean).slice(0, 5),
+    };
+  }
+  if (method === "POST" && url.includes("/spans/batch")) {
+    const spans = body?.spans ?? [];
+    return {
+      route: "spans-batch",
+      spanCount: spans.length,
+      finalizedSpanCount: spans.filter(
+        (span) => span?.endTime !== undefined || span?.end_time !== undefined,
+      ).length,
+      spanIds: spans.map((span) => span?.id).filter(Boolean).slice(0, 5),
+    };
+  }
+  if (method === "PATCH" && url.match(/\/traces\/[^/]+$/)) {
+    return { route: "trace-patch" };
+  }
+  if (method === "PATCH" && url.match(/\/spans\/[^/]+$/)) {
+    return { route: "span-patch" };
+  }
+  if (method === "GET" && url.includes("/projects")) {
+    return { route: "projects-list" };
+  }
+  return { route: "other" };
+}
+
+function record(method, url, body, headers) {
   console.error(`[mock-opik] ${method} ${url}`);
-  received.requests.push({ method, url, bodyLength: JSON.stringify(body).length });
+  const encodedBody = JSON.stringify(body);
+  const summary = buildRequestSummary(method, url, body);
+  received.requests.push({
+    at: new Date().toISOString(),
+    method,
+    url,
+    headers: redactHeaders(headers),
+    bodyLength: encodedBody.length,
+    body,
+    ...summary,
+  });
 
   if (method === "POST" && url.includes("/traces/batch")) {
     const traces = body?.traces ?? [];
@@ -57,7 +115,7 @@ const server = http.createServer((req, res) => {
       // ignore parse errors for non-JSON bodies
     }
 
-    record(req.method, req.url, body);
+    record(req.method, req.url, body, req.headers);
 
     // Respond 200/204 to everything so the plugin doesn't retry.
     const status =
@@ -94,6 +152,12 @@ function writeResult() {
   };
   fs.writeFileSync(RESULT_FILE, JSON.stringify(summary, null, 2));
   console.error(`[mock-opik] result written to ${RESULT_FILE}:`, summary);
+  const journal = {
+    summary,
+    requests: received.requests,
+  };
+  fs.writeFileSync(JOURNAL_FILE, JSON.stringify(journal, null, 2));
+  console.error(`[mock-opik] journal written to ${JOURNAL_FILE}`);
 }
 
 process.on("SIGTERM", () => {

@@ -8,6 +8,31 @@ import fs from "node:fs";
 
 const RESULT_FILE = process.env.E2E_RESULT_FILE ?? "e2e-result.json";
 const LLM_RESULT_FILE = process.env.E2E_LLM_RESULT_FILE ?? "e2e-llm-result.json";
+const OPIK_JOURNAL_FILE = process.env.E2E_OPIK_JOURNAL_FILE ?? "e2e-opik-journal.json";
+const LLM_JOURNAL_FILE = process.env.E2E_LLM_JOURNAL_FILE ?? "e2e-llm-journal.json";
+
+function readJsonIfExists(file) {
+  return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
+}
+
+function formatRecentRequests(label, journal) {
+  if (!journal?.requests?.length) {
+    return `  ${label}: no journal entries (${label === "Opik" ? OPIK_JOURNAL_FILE : LLM_JOURNAL_FILE})`;
+  }
+  const recent = journal.requests.slice(-3);
+  const lines = recent.map((entry) => {
+    const summary =
+      entry.route === "traces-batch"
+        ? `traceCount=${entry.traceCount ?? 0} finalized=${entry.finalizedTraceCount ?? 0}`
+        : entry.route === "spans-batch"
+          ? `spanCount=${entry.spanCount ?? 0} finalized=${entry.finalizedSpanCount ?? 0}`
+          : entry.route === "responses" || entry.route === "chat-completions"
+            ? `model=${entry.model ?? "unknown"} stream=${entry.stream === true}`
+            : "";
+    return `    - ${entry.method} ${entry.url} route=${entry.route}${summary ? ` ${summary}` : ""}`;
+  });
+  return [`  ${label} journal: ${label === "Opik" ? OPIK_JOURNAL_FILE : LLM_JOURNAL_FILE}`, ...lines].join("\n");
+}
 
 if (!fs.existsSync(RESULT_FILE)) {
   console.error(`[check-e2e] FAIL: result file not found: ${RESULT_FILE}`);
@@ -26,6 +51,8 @@ if (!fs.existsSync(LLM_RESULT_FILE)) {
 
 const llmResult = JSON.parse(fs.readFileSync(LLM_RESULT_FILE, "utf8"));
 console.log("[check-e2e] llm result:", llmResult);
+const opikJournal = readJsonIfExists(OPIK_JOURNAL_FILE);
+const llmJournal = readJsonIfExists(LLM_JOURNAL_FILE);
 
 const failures = [];
 const llmGenerationRequests = (llmResult.responses ?? 0) + (llmResult.chatCompletions ?? 0);
@@ -65,6 +92,8 @@ if (llmGenerationRequests < 1) {
 if (failures.length > 0) {
   console.error("[check-e2e] FAIL:");
   for (const f of failures) console.error("  •", f);
+  console.error(formatRecentRequests("Opik", opikJournal));
+  console.error(formatRecentRequests("LLM", llmJournal));
   process.exit(1);
 }
 
