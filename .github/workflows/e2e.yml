@@ -67,19 +67,40 @@ jobs:
           npm config set prefix ~/.npm-global
           echo "$HOME/.npm-global/bin" >> $GITHUB_PATH
 
+      - name: Resolve OpenClaw version
+        id: openclaw-version
+        run: |
+          if [ "${{ matrix.openclaw-version }}" = "latest" ]; then
+            version="$(npm view openclaw version)"
+          else
+            version="${{ matrix.openclaw-version }}"
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "Resolved OpenClaw version: $version"
+
       - name: Cache OpenClaw install
+        id: cache-openclaw
         uses: actions/cache@v4
         with:
           path: ~/.npm-global
-          key: openclaw-${{ matrix.openclaw-version }}-${{ runner.os }}-${{ runner.arch }}
+          key: openclaw-${{ steps.openclaw-version.outputs.value }}-${{ runner.os }}-${{ runner.arch }}
 
-      - name: Install OpenClaw (${{ matrix.openclaw-version }})
-        run: npm install -g openclaw@${{ matrix.openclaw-version }}
+      - name: Install OpenClaw (${{ steps.openclaw-version.outputs.value }})
+        if: steps.cache-openclaw.outputs.cache-hit != 'true'
+        run: npm install -g openclaw@${{ steps.openclaw-version.outputs.value }}
 
       - name: Print OpenClaw version
         run: openclaw --version
 
+      - name: Cache plugin dependencies
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
       - name: Install plugin dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci
 
       - name: Build plugin tarball
