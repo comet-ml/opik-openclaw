@@ -34,11 +34,11 @@ function record(method, url, body) {
   if (method === "POST" && url.includes("/traces/batch")) {
     const traces = body?.traces ?? [];
     received.traces += traces.length;
-    received.endedTraces += traces.filter((trace) => trace?.endTime !== undefined).length;
+    received.endedTraces += traces.filter((trace) => trace?.endTime !== undefined || trace?.end_time !== undefined).length;
   } else if (method === "POST" && url.includes("/spans/batch")) {
     const spans = body?.spans ?? [];
     received.spans += spans.length;
-    received.endedSpans += spans.filter((span) => span?.endTime !== undefined).length;
+    received.endedSpans += spans.filter((span) => span?.endTime !== undefined || span?.end_time !== undefined).length;
   } else if (method === "PATCH" && url.match(/\/traces\/[^/]+$/)) {
     received.tracePatches += 1;
   } else if (method === "PATCH" && url.match(/\/spans\/[^/]+$/)) {
