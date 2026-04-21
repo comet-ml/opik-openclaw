@@ -48,8 +48,6 @@ jobs:
       E2E_RESULT_FILE: e2e-result.json
       E2E_LLM_RESULT_FILE: e2e-llm-result.json
       OPENCLAW_GATEWAY_TOKEN: e2e-test-token
-      OPENAI_API_KEY: mock-key
-      OPENAI_BASE_URL: http://127.0.0.1:18790/v1
 
     steps:
       - name: Checkout plugin source
@@ -101,15 +99,34 @@ jobs:
             "agents": {
               "defaults": {
                 "model": {
-                  "primary": "openai/gpt-4o-mini"
+                  "primary": "mock-openai/gpt-4o-mini"
                 }
               }
             },
-            "auth": {
-              "profiles": {
-                "openai:default": {
-                  "provider": "openai",
-                  "mode": "api_key"
+            "models": {
+              "mode": "merge",
+              "providers": {
+                "mock-openai": {
+                  "baseUrl": "http://127.0.0.1:18790/v1",
+                  "apiKey": "mock-key",
+                  "authHeader": true,
+                  "api": "openai-responses",
+                  "models": [
+                    {
+                      "id": "gpt-4o-mini",
+                      "name": "Mock GPT-4o Mini",
+                      "reasoning": false,
+                      "input": ["text"],
+                      "cost": {
+                        "input": 0,
+                        "output": 0,
+                        "cacheRead": 0,
+                        "cacheWrite": 0
+                      },
+                      "contextWindow": 128000,
+                      "maxTokens": 16384
+                    }
+                  ]
                 }
               }
             },
@@ -127,19 +144,6 @@ jobs:
                   }
                 }
               }
-            }
-          }
-          EOF
-
-      - name: Write agent auth credentials
-        run: |
-          mkdir -p ~/.openclaw/agents/main/agent
-          cat > ~/.openclaw/agents/main/agent/auth-profiles.json << 'EOF'
-          {
-            "openai:default": {
-              "provider": "openai",
-              "mode": "api_key",
-              "apiKey": "mock-key"
             }
           }
           EOF

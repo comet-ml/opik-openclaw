@@ -28,6 +28,7 @@ const llmResult = JSON.parse(fs.readFileSync(LLM_RESULT_FILE, "utf8"));
 console.log("[check-e2e] llm result:", llmResult);
 
 const failures = [];
+const llmGenerationRequests = (llmResult.responses ?? 0) + (llmResult.chatCompletions ?? 0);
 
 if (result.traces < 1) {
   failures.push(`Expected ≥1 trace batch, got ${result.traces}`);
@@ -49,9 +50,9 @@ if (result.totalRequests < 1) {
   failures.push("No requests at all reached the mock Opik server — plugin hooks may not have fired");
 }
 
-if (llmResult.chatCompletions < 1) {
+if (llmGenerationRequests < 1) {
   failures.push(
-    `Expected ≥1 mock LLM chat completion request, got ${llmResult.chatCompletions}`,
+    `Expected ≥1 mock LLM generation request, got ${llmGenerationRequests}`,
   );
 }
 
