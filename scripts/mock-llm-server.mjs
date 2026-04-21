@@ -11,9 +11,17 @@
  */
 
 import http from "node:http";
+import fs from "node:fs";
 
 const PORT = parseInt(process.env.MOCK_LLM_PORT ?? "18790", 10);
 const MODEL = "gpt-4o-mini";
+const RESULT_FILE = process.env.E2E_LLM_RESULT_FILE ?? "e2e-llm-result.json";
+
+const received = {
+  models: 0,
+  chatCompletions: 0,
+  streamingChatCompletions: 0,
+};
 
 function nonStreamingResponse(model) {
   return JSON.stringify({
@@ -52,6 +60,7 @@ const server = http.createServer((req, res) => {
     console.error(`[mock-llm] ${req.method} ${req.url}`);
 
     if (req.url === "/v1/models" && req.method === "GET") {
+      received.models += 1;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ object: "list", data: [{ id: MODEL, object: "model" }] }));
       return;
@@ -62,6 +71,10 @@ const server = http.createServer((req, res) => {
       try { body = JSON.parse(raw); } catch { /* ignore */ }
 
       const wantsStream = body.stream === true;
+      received.chatCompletions += 1;
+      if (wantsStream) {
+        received.streamingChatCompletions += 1;
+      }
 
       if (wantsStream) {
         res.writeHead(200, {
@@ -86,5 +99,17 @@ server.listen(PORT, "127.0.0.1", () => {
   console.error(`[mock-llm] listening on http://127.0.0.1:${PORT}`);
 });
 
-process.on("SIGTERM", () => server.close(() => process.exit(0)));
-process.on("SIGINT", () => server.close(() => process.exit(0)));
+function writeResult() {
+  fs.writeFileSync(RESULT_FILE, JSON.stringify(received, null, 2));
+  console.error(`[mock-llm] result written to ${RESULT_FILE}:`, received);
+}
+
+process.on("SIGTERM", () => {
+  writeResult();
+  server.close(() => process.exit(0));
+});
+
+process.on("SIGINT", () => {
+  writeResult();
+  server.close(() => process.exit(0));
+});

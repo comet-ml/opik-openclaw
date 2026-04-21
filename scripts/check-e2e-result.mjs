@@ -7,6 +7,7 @@
 import fs from "node:fs";
 
 const RESULT_FILE = process.env.E2E_RESULT_FILE ?? "e2e-result.json";
+const LLM_RESULT_FILE = process.env.E2E_LLM_RESULT_FILE ?? "e2e-llm-result.json";
 
 if (!fs.existsSync(RESULT_FILE)) {
   console.error(`[check-e2e] FAIL: result file not found: ${RESULT_FILE}`);
@@ -16,6 +17,15 @@ if (!fs.existsSync(RESULT_FILE)) {
 
 const result = JSON.parse(fs.readFileSync(RESULT_FILE, "utf8"));
 console.log("[check-e2e] result:", result);
+
+if (!fs.existsSync(LLM_RESULT_FILE)) {
+  console.error(`[check-e2e] FAIL: LLM result file not found: ${LLM_RESULT_FILE}`);
+  console.error("  The mock LLM server may not have written its result (SIGTERM not received?).");
+  process.exit(1);
+}
+
+const llmResult = JSON.parse(fs.readFileSync(LLM_RESULT_FILE, "utf8"));
+console.log("[check-e2e] llm result:", llmResult);
 
 const failures = [];
 
@@ -27,8 +37,22 @@ if (result.spans < 1) {
   failures.push(`Expected ≥1 span batch, got ${result.spans}`);
 }
 
+if (result.tracePatches < 1) {
+  failures.push(`Expected ≥1 trace patch, got ${result.tracePatches}`);
+}
+
+if (result.spanPatches < 1) {
+  failures.push(`Expected ≥1 span patch, got ${result.spanPatches}`);
+}
+
 if (result.totalRequests < 1) {
   failures.push("No requests at all reached the mock Opik server — plugin hooks may not have fired");
+}
+
+if (llmResult.chatCompletions < 1) {
+  failures.push(
+    `Expected ≥1 mock LLM chat completion request, got ${llmResult.chatCompletions}`,
+  );
 }
 
 if (failures.length > 0) {
@@ -37,4 +61,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("[check-e2e] PASS — traces and spans received by mock Opik server");
+console.log("[check-e2e] PASS — traces, spans, patches, and mock LLM traffic were observed");

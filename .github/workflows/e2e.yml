@@ -45,6 +45,8 @@ jobs:
           - latest
 
     env:
+      E2E_RESULT_FILE: e2e-result.json
+      E2E_LLM_RESULT_FILE: e2e-llm-result.json
       OPENCLAW_GATEWAY_TOKEN: e2e-test-token
       OPENAI_API_KEY: mock-key
       OPENAI_BASE_URL: http://127.0.0.1:18790/v1
@@ -146,13 +148,16 @@ jobs:
         run: openclaw plugins install ./opik-opik-openclaw-*.tgz
 
       - name: Start mock Opik server
-        run: node scripts/mock-opik-server.mjs &
+        run: |
+          node scripts/mock-opik-server.mjs > mock-opik.log 2>&1 &
+          echo $! > mock-opik.pid
         env:
           MOCK_OPIK_PORT: "18791"
-          E2E_RESULT_FILE: e2e-result.json
 
       - name: Start mock LLM server
-        run: node scripts/mock-llm-server.mjs &
+        run: |
+          node scripts/mock-llm-server.mjs > mock-llm.log 2>&1 &
+          echo $! > mock-llm.pid
         env:
           MOCK_LLM_PORT: "18790"
 
@@ -165,7 +170,9 @@ jobs:
           done
 
       - name: Start OpenClaw gateway
-        run: openclaw gateway run &
+        run: |
+          openclaw gateway run > gateway.log 2>&1 &
+          echo $! > gateway.pid
 
       - name: Wait for gateway to be ready
         run: |
@@ -176,29 +183,46 @@ jobs:
           openclaw health
 
       - name: Run agent turn
-        run: openclaw agent --agent main --message "ping" --deliver
+        run: |
+          set -o pipefail
+          openclaw agent --agent main --message "ping" --deliver 2>&1 | tee agent-output.log
+          if grep -q "falling back to embedded" agent-output.log; then
+            echo "[e2e] FAIL: gateway turn fell back to embedded mode"
+            exit 1
+          fi
         timeout-minutes: 2
 
       - name: Stop gateway and flush traces
         run: |
           openclaw gateway stop || true
+          if [ -f gateway.pid ]; then
+            kill "$(cat gateway.pid)" > /dev/null 2>&1 || true
+          fi
           sleep 2
 
       - name: Stop mock servers and collect results
         run: |
-          pkill -f mock-opik-server.mjs || true
-          pkill -f mock-llm-server.mjs || true
+          if [ -f mock-opik.pid ]; then
+            kill "$(cat mock-opik.pid)" > /dev/null 2>&1 || true
+          fi
+          if [ -f mock-llm.pid ]; then
+            kill "$(cat mock-llm.pid)" > /dev/null 2>&1 || true
+          fi
           sleep 1
 
-      - name: Assert traces and spans were exported
+      - name: Assert E2E results
         run: node scripts/check-e2e-result.mjs
-        env:
-          E2E_RESULT_FILE: e2e-result.json
 
       - name: Upload E2E result on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-result
-          path: e2e-result.json
+          name: e2e-debug
+          path: |
+            e2e-result.json
+            e2e-llm-result.json
+            agent-output.log
+            gateway.log
+            mock-opik.log
+            mock-llm.log
           if-no-files-found: ignore
