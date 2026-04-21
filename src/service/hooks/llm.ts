@@ -54,38 +54,42 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
     const trigger = resolveTrigger(agentCtxObj);
 
     const existing = deps.activeTraces.get(sessionKey);
-    if (existing) {
-      deps.closeActiveTrace(existing, `replace active trace sessionKey=${sessionKey}`);
-      deps.activeTraces.delete(sessionKey);
-      deps.forgetSessionCorrelation(sessionKey);
-    }
-
     let trace: Trace;
-    try {
-      const sanitizedTraceInput = sanitizeValueForOpik({
-        prompt: event.prompt,
-        systemPrompt: event.systemPrompt,
-        imagesCount: event.imagesCount,
-      }) as Record<string, unknown>;
-      trace = client.trace({
-        name: `${event.model} · ${channelId ?? "unknown"}`,
-        threadId: sessionKey,
-        input: sanitizedTraceInput,
-        metadata: {
-          created_from: OPIK_CREATED_FROM,
-          provider: normalizedProvider,
-          model: event.model,
-          sessionId: event.sessionId,
-          runId: event.runId,
-          agentId: agentCtx.agentId,
-          ...(channelId ? { channel: channelId, channelId } : {}),
-          ...(trigger ? { trigger } : {}),
-        },
-        tags: deps.getTags().length > 0 ? deps.getTags() : undefined,
-      });
-    } catch (err) {
-      deps.warn(`opik: trace creation failed (sessionKey=${sessionKey}): ${deps.formatError(err)}`);
-      return;
+    if (existing) {
+      trace = existing.trace;
+      if (existing.llmSpan) {
+        deps.safeSpanEnd(existing.llmSpan, `replace active llm span sessionKey=${sessionKey}`);
+        existing.llmSpan = null;
+      }
+    } else {
+      try {
+        const sanitizedTraceInput = sanitizeValueForOpik({
+          prompt: event.prompt,
+          systemPrompt: event.systemPrompt,
+          imagesCount: event.imagesCount,
+        }) as Record<string, unknown>;
+        trace = client.trace({
+          name: `${event.model} · ${channelId ?? "unknown"}`,
+          threadId: sessionKey,
+          input: sanitizedTraceInput,
+          metadata: {
+            created_from: OPIK_CREATED_FROM,
+            provider: normalizedProvider,
+            model: event.model,
+            sessionId: event.sessionId,
+            runId: event.runId,
+            agentId: agentCtx.agentId,
+            ...(channelId ? { channel: channelId, channelId } : {}),
+            ...(trigger ? { trigger } : {}),
+          },
+          tags: deps.getTags().length > 0 ? deps.getTags() : undefined,
+        });
+      } catch (err) {
+        deps.warn(
+          `opik: trace creation failed (sessionKey=${sessionKey}): ${deps.formatError(err)}`,
+        );
+        return;
+      }
     }
 
     let llmSpan: Span | null = null;
@@ -108,20 +112,30 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
     }
 
     const now = Date.now();
-    deps.activeTraces.set(sessionKey, {
-      trace,
-      llmSpan,
-      toolSpans: new Map(),
-      subagentSpans: new Map(),
-      startedAt: now,
-      lastActivityAt: now,
-      costMeta: {},
-      usage: {},
-      model: event.model,
-      provider: normalizedProvider,
-      channelId,
-      trigger,
-    });
+    if (existing) {
+      deps.applyContextMeta(existing, agentCtxObj);
+      existing.llmSpan = llmSpan;
+      existing.lastActivityAt = now;
+      existing.model = event.model;
+      existing.provider = normalizedProvider;
+      if (channelId) existing.channelId = channelId;
+      if (trigger) existing.trigger = trigger;
+    } else {
+      deps.activeTraces.set(sessionKey, {
+        trace,
+        llmSpan,
+        toolSpans: new Map(),
+        subagentSpans: new Map(),
+        startedAt: now,
+        lastActivityAt: now,
+        costMeta: {},
+        usage: {},
+        model: event.model,
+        provider: normalizedProvider,
+        channelId,
+        trigger,
+      });
+    }
 
     deps.scheduleMediaAttachmentUploads({
       entityType: "trace",
