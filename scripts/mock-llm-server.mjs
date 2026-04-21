@@ -16,6 +16,7 @@ import fs from "node:fs";
 const PORT = parseInt(process.env.MOCK_LLM_PORT ?? "18790", 10);
 const MODEL = "gpt-4o-mini";
 const RESULT_FILE = process.env.E2E_LLM_RESULT_FILE ?? "e2e-llm-result.json";
+const JOURNAL_FILE = process.env.E2E_LLM_JOURNAL_FILE ?? "e2e-llm-journal.json";
 const RESPONSE_TEXT = "pong";
 
 const received = {
@@ -24,7 +25,31 @@ const received = {
   streamingResponses: 0,
   chatCompletions: 0,
   streamingChatCompletions: 0,
+  requests: [],
 };
+
+function redactHeaders(headers) {
+  const entries = Object.entries(headers ?? {});
+  return Object.fromEntries(
+    entries.map(([key, value]) => {
+      if (key.toLowerCase() === "authorization") {
+        return [key, "<redacted>"];
+      }
+      return [key, value];
+    }),
+  );
+}
+
+function recordRequest(req, body, summary) {
+  received.requests.push({
+    at: new Date().toISOString(),
+    method: req.method,
+    url: req.url,
+    headers: redactHeaders(req.headers),
+    body,
+    ...summary,
+  });
+}
 
 function nonStreamingResponse(model) {
   return JSON.stringify({
@@ -112,6 +137,7 @@ const server = http.createServer((req, res) => {
 
     if (req.url === "/v1/models" && req.method === "GET") {
       received.models += 1;
+      recordRequest(req, undefined, { route: "models-list" });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ object: "list", data: [{ id: MODEL, object: "model" }] }));
       return;
@@ -126,6 +152,12 @@ const server = http.createServer((req, res) => {
       if (wantsStream) {
         received.streamingChatCompletions += 1;
       }
+      recordRequest(req, body, {
+        route: "chat-completions",
+        stream: wantsStream,
+        model: body.model ?? MODEL,
+        inputShape: Array.isArray(body.messages) ? "messages" : typeof body.input,
+      });
 
       if (wantsStream) {
         res.writeHead(200, {
@@ -150,6 +182,12 @@ const server = http.createServer((req, res) => {
       if (wantsStream) {
         received.streamingResponses += 1;
       }
+      recordRequest(req, body, {
+        route: "responses",
+        stream: wantsStream,
+        model: body.model ?? MODEL,
+        inputShape: Array.isArray(body.input) ? "input[]" : typeof body.input,
+      });
 
       if (wantsStream) {
         res.writeHead(200, {
@@ -165,6 +203,7 @@ const server = http.createServer((req, res) => {
       return;
     }
 
+    recordRequest(req, body, { route: "not-found" });
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: { message: "not found", type: "invalid_request_error" } }));
   });
@@ -175,8 +214,22 @@ server.listen(PORT, "127.0.0.1", () => {
 });
 
 function writeResult() {
-  fs.writeFileSync(RESULT_FILE, JSON.stringify(received, null, 2));
-  console.error(`[mock-llm] result written to ${RESULT_FILE}:`, received);
+  const summary = {
+    models: received.models,
+    responses: received.responses,
+    streamingResponses: received.streamingResponses,
+    chatCompletions: received.chatCompletions,
+    streamingChatCompletions: received.streamingChatCompletions,
+    totalRequests: received.requests.length,
+  };
+  fs.writeFileSync(RESULT_FILE, JSON.stringify(summary, null, 2));
+  console.error(`[mock-llm] result written to ${RESULT_FILE}:`, summary);
+  const journal = {
+    summary,
+    requests: received.requests,
+  };
+  fs.writeFileSync(JOURNAL_FILE, JSON.stringify(journal, null, 2));
+  console.error(`[mock-llm] journal written to ${JOURNAL_FILE}`);
 }
 
 process.on("SIGTERM", () => {
