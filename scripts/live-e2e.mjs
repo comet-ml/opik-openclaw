@@ -9,13 +9,32 @@ import { fileURLToPath } from "node:url";
 import { Opik } from "opik";
 
 const ROOT_DIR = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const REQUIRED_ENV = ["OPENAI_API_KEY", "OPIK_API_KEY", "OPIK_URL_OVERRIDE"];
-const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]?.trim());
+const hostHomeDir = process.env.HOME ?? "";
+const hostOpenClawConfigPath = path.join(hostHomeDir, ".openclaw", "openclaw.json");
+const hostOpenClawConfig = await readJsonIfExists(hostOpenClawConfigPath);
+const hostOpikPluginConfig = hostOpenClawConfig?.plugins?.entries?.["opik-openclaw"]?.config;
 
-if (missingEnv.length > 0) {
+const openAiApiKey = process.env.OPENAI_API_KEY?.trim();
+const opikApiKey = process.env.OPIK_API_KEY?.trim() ?? trimOrUndefined(hostOpikPluginConfig?.apiKey);
+const opikApiUrl =
+  process.env.OPIK_URL_OVERRIDE?.trim() ?? trimOrUndefined(hostOpikPluginConfig?.apiUrl);
+
+const missingRequirements = [];
+if (!openAiApiKey) {
+  missingRequirements.push("OPENAI_API_KEY");
+}
+if (!opikApiKey) {
+  missingRequirements.push("OPIK_API_KEY or ~/.openclaw/openclaw.json plugins.entries.opik-openclaw.config.apiKey");
+}
+if (!opikApiUrl) {
+  missingRequirements.push(
+    "OPIK_URL_OVERRIDE or ~/.openclaw/openclaw.json plugins.entries.opik-openclaw.config.apiUrl",
+  );
+}
+if (missingRequirements.length > 0) {
   console.error(
-    `[live-e2e] missing required env: ${missingEnv.join(", ")}\n` +
-      "Set the live OpenAI + Opik credentials, then rerun `npm run test:live`.",
+    `[live-e2e] missing required live config:\n- ${missingRequirements.join("\n- ")}\n` +
+      "Set env vars or configure the installed opik-openclaw plugin in ~/.openclaw/openclaw.json.",
   );
   process.exit(1);
 }
@@ -32,8 +51,14 @@ const spansPath = path.join(artifactDir, "opik-spans.json");
 
 const gatewayPort = Number.parseInt(process.env.OPENCLAW_LIVE_GATEWAY_PORT ?? "18789", 10);
 const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN?.trim() || `live-${randomUUID()}`;
-const opikProjectName = process.env.OPIK_PROJECT_NAME?.trim() || "openclaw";
-const opikWorkspaceName = process.env.OPIK_WORKSPACE?.trim() || "default";
+const opikProjectName =
+  process.env.OPIK_PROJECT_NAME?.trim() ??
+  trimOrUndefined(hostOpikPluginConfig?.projectName) ??
+  "openclaw";
+const opikWorkspaceName =
+  process.env.OPIK_WORKSPACE?.trim() ??
+  trimOrUndefined(hostOpikPluginConfig?.workspaceName) ??
+  "default";
 const liveModel = process.env.OPENCLAW_LIVE_MODEL?.trim() || "gpt-4o-mini";
 const requestedOpenClawVersion = process.env.OPENCLAW_LIVE_OPENCLAW_VERSION?.trim() || "2026.4.15";
 const promptToken = `token-${randomUUID().slice(0, 8)}`;
@@ -45,13 +70,14 @@ const openclawEnv = {
   ...process.env,
   HOME: homeDir,
   OPENCLAW_GATEWAY_TOKEN: gatewayToken,
+  OPENAI_API_KEY: openAiApiKey,
 };
 
 await fs.mkdir(openclawDir, { recursive: true });
 await fs.mkdir(artifactDir, { recursive: true });
 
 const pluginTarballPath = await packPlugin();
-await writeOpenClawConfig();
+await writeOpenClawConfig({ enablePlugin: false });
 
 let gatewayProcess;
 
@@ -60,13 +86,14 @@ try {
     env: openclawEnv,
     name: "openclaw plugins install",
   });
+  await writeOpenClawConfig({ enablePlugin: true });
 
   gatewayProcess = startDetachedProcess(["gateway", "run"], gatewayLogPath);
   await waitForGateway();
 
   opikSearchStartTime = new Date().toISOString();
   const agentRun = await runCommand(
-    ["agent", "--agent", "main", "--message", agentMessage, "--deliver"],
+    ["agent", "--agent", "main", "--message", agentMessage],
     {
       env: openclawEnv,
       name: "openclaw agent",
@@ -98,24 +125,20 @@ try {
 }
 
 async function packPlugin() {
-  const pack = await runCommand(["pack", "--pack-destination", artifactDir], {
+  const pack = await runCommand(["pack", "--json", "--pack-destination", artifactDir], {
     env: process.env,
     name: "npm pack",
     spawnCommand: "npm",
     captureOutput: true,
   });
-  const tarball = pack.output
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .find((line) => line.endsWith(".tgz"));
-  if (!tarball) {
+  const tarball = JSON.parse(pack.output)?.[0]?.filename;
+  if (typeof tarball !== "string" || !tarball.endsWith(".tgz")) {
     throw new Error(`npm pack did not report a tarball path:\n${pack.output}`);
   }
   return path.join(artifactDir, tarball);
 }
 
-async function writeOpenClawConfig() {
+async function writeOpenClawConfig(params) {
   const config = {
     gateway: {
       mode: "local",
@@ -130,23 +153,25 @@ async function writeOpenClawConfig() {
         },
       },
     },
-    plugins: {
+  };
+  if (params.enablePlugin) {
+    config.plugins = {
       allow: ["opik-openclaw"],
       entries: {
         "opik-openclaw": {
           enabled: true,
           config: {
             enabled: true,
-            apiUrl: process.env.OPIK_URL_OVERRIDE,
-            apiKey: process.env.OPIK_API_KEY,
+            apiUrl: opikApiUrl,
+            apiKey: opikApiKey,
             projectName: opikProjectName,
             workspaceName: opikWorkspaceName,
             tags: ["live-e2e"],
           },
         },
       },
-    },
-  };
+    };
+  }
   await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf8");
 }
 
@@ -218,8 +243,8 @@ async function stopGateway(gateway) {
 
 async function verifyOpikExport() {
   const client = new Opik({
-    apiKey: process.env.OPIK_API_KEY,
-    apiUrl: process.env.OPIK_URL_OVERRIDE,
+    apiKey: opikApiKey,
+    apiUrl: opikApiUrl,
     projectName: opikProjectName,
     workspaceName: opikWorkspaceName,
   });
@@ -268,6 +293,19 @@ function serializedContains(value, token) {
     return false;
   }
   return JSON.stringify(value).includes(token);
+}
+
+async function readJsonIfExists(file) {
+  try {
+    const raw = await fs.readFile(file, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function trimOrUndefined(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 async function runCommand(args, options) {

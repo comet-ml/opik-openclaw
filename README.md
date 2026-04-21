@@ -182,17 +182,14 @@ npm run smoke
 Optional live gateway E2E:
 
 ```bash
-OPENAI_API_KEY=... \
-OPIK_API_KEY=... \
-OPIK_URL_OVERRIDE=https://www.comet.com/opik/api \
-OPIK_PROJECT_NAME=openclaw \
-OPIK_WORKSPACE=default \
 npm run test:live
 ```
 
 Notes:
 
 - uses an isolated `.artifacts/live-e2e/<run-id>/home/.openclaw` so it does not touch your normal OpenClaw config
+- reuses `~/.openclaw/openclaw.json -> plugins.entries.opik-openclaw.config` for `apiUrl` / `apiKey` / project / workspace when those env vars are not set
+- still requires `OPENAI_API_KEY` in env for the real model call
 - packs and installs the current plugin build into a fresh OpenClaw home
 - falls back to `npx openclaw@${OPENCLAW_LIVE_OPENCLAW_VERSION:-2026.4.15}` when `openclaw` is not already on your `PATH`
 - override the live model with `OPENCLAW_LIVE_MODEL` if `gpt-4o-mini` is not what you want to exercise
