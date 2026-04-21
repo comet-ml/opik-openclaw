@@ -40,8 +40,11 @@ const opikWorkspaceResolution = resolveConfigValue({
   fallbackValue: trimOrUndefined(hostOpikPluginConfig?.workspaceName),
   fallbackSource: hostOpenClawConfigPath,
 });
+
 const opikApiKey = opikApiKeyResolution.value;
 const opikApiUrl = opikApiUrlResolution.value;
+const opikProjectName = opikProjectResolution.value ?? "openclaw";
+const opikWorkspaceName = opikWorkspaceResolution.value ?? "default";
 
 const missingRequirements = [];
 if (!openAiApiKey) {
@@ -69,25 +72,94 @@ if (missingRequirements.length > 0) {
   process.exit(1);
 }
 
+const scenarioDefinitions = [
+  {
+    id: "basic-response",
+    minSpanCount: 1,
+    buildPrompt: (token) => `Reply with the single word pong. Preserve token ${token}.`,
+    assertAgentOutput(output) {
+      if (!output.toLowerCase().includes("pong")) {
+        throw new Error("agent output did not contain the expected pong response");
+      }
+    },
+    assertExport({ traces, spans }) {
+      if (traces.length !== 1) {
+        throw new Error(`expected exactly 1 matching trace, got ${traces.length}`);
+      }
+      if (spans.length < 1) {
+        throw new Error(`expected at least 1 matching span, got ${spans.length}`);
+      }
+    },
+  },
+  {
+    id: "tool-exec",
+    minSpanCount: 2,
+    buildPrompt: (token) =>
+      `Use the exec tool exactly once to run the shell command printf '${token}'. ` +
+      `After reading the command output, reply with only ${token}. Do not guess and do not skip the tool.`,
+    assertAgentOutput(output, token) {
+      if (!output.includes(token)) {
+        throw new Error("agent output did not contain the expected tool token");
+      }
+    },
+    assertExport({ traces, spans }) {
+      if (traces.length !== 1) {
+        throw new Error(`expected exactly 1 matching trace, got ${traces.length}`);
+      }
+      const [trace] = traces;
+      if (trace.hasToolSpans !== true) {
+        throw new Error("matching trace did not report tool spans");
+      }
+      if ((trace.spanCount ?? 0) < 2) {
+        throw new Error(`expected at least 2 spans on the matching trace, got ${trace.spanCount}`);
+      }
+
+      const llmSpans = spans.filter((span) => span.type === "llm");
+      const toolSpans = spans.filter((span) => span.type === "tool");
+      if (llmSpans.length < 1) {
+        throw new Error("no llm spans were returned for the tool scenario");
+      }
+      if (toolSpans.length < 1) {
+        throw new Error("no tool spans were returned for the tool scenario");
+      }
+
+      const llmSpanIds = new Set(llmSpans.map((span) => span.id).filter(Boolean));
+      const hasNestedToolSpan = toolSpans.some(
+        (span) => typeof span.parentSpanId === "string" && llmSpanIds.has(span.parentSpanId),
+      );
+      if (!hasNestedToolSpan) {
+        throw new Error("no tool span was parented to a matching llm span");
+      }
+    },
+  },
+];
+
+const requestedScenarioIds = parseScenarioIds(process.env.OPENCLAW_LIVE_SCENARIOS);
+const scenarios =
+  requestedScenarioIds.length > 0
+    ? scenarioDefinitions.filter((scenario) => requestedScenarioIds.includes(scenario.id))
+    : scenarioDefinitions;
+
+if (scenarios.length === 0) {
+  throw new Error(
+    requestedScenarioIds.length > 0
+      ? `OPENCLAW_LIVE_SCENARIOS did not match any known scenarios: ${requestedScenarioIds.join(", ")}`
+      : "no live scenarios were selected",
+  );
+}
+
 const runId = `live-e2e-${Date.now()}-${randomUUID().slice(0, 8)}`;
 const artifactDir = path.join(ROOT_DIR, ".artifacts", "live-e2e", runId);
 const homeDir = path.join(artifactDir, "home");
 const openclawDir = path.join(homeDir, ".openclaw");
 const configPath = path.join(openclawDir, "openclaw.json");
 const gatewayLogPath = path.join(artifactDir, "gateway.log");
-const agentOutputPath = path.join(artifactDir, "agent-output.log");
-const tracesPath = path.join(artifactDir, "opik-traces.json");
-const spansPath = path.join(artifactDir, "opik-spans.json");
+const resultsPath = path.join(artifactDir, "results.json");
 
 const gatewayPort = Number.parseInt(process.env.OPENCLAW_LIVE_GATEWAY_PORT ?? "18789", 10);
 const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN?.trim() || `live-${randomUUID()}`;
-const opikProjectName = opikProjectResolution.value ?? "openclaw";
-const opikWorkspaceName = opikWorkspaceResolution.value ?? "default";
 const liveModel = process.env.OPENCLAW_LIVE_MODEL?.trim() || "gpt-4o-mini";
 const requestedOpenClawVersion = process.env.OPENCLAW_LIVE_OPENCLAW_VERSION?.trim() || "2026.4.15";
-const promptToken = `token-${randomUUID().slice(0, 8)}`;
-const agentMessage = `Reply with the single word pong. Preserve token ${promptToken}.`;
-let opikSearchStartTime = new Date().toISOString();
 
 const openclawInvocation = resolveOpenClawInvocation(requestedOpenClawVersion);
 const openclawEnv = {
@@ -107,8 +179,15 @@ let gatewayProcess;
 
 try {
   console.log(
-    `[live-e2e] config sources: opikApiKey=${opikApiKeyResolution.source}, opikApiUrl=${opikApiUrlResolution.source}, project=${opikProjectResolution.source}, workspace=${opikWorkspaceResolution.source}`,
+    `[live-e2e] config sources: opikApiKey=${opikApiKeyResolution.source}, ` +
+      `opikApiUrl=${opikApiUrlResolution.source}, project=${opikProjectResolution.source}, ` +
+      `workspace=${opikWorkspaceResolution.source}`,
   );
+  console.log(
+    `[live-e2e] scenarios: ${scenarios.map((scenario) => scenario.id).join(", ")} ` +
+      `openclaw=${openclawInvocation.command}${openclawInvocation.baseArgs.length > 0 ? ` ${openclawInvocation.baseArgs.join(" ")}` : ""}`,
+  );
+
   await runCommand(["plugins", "install", pluginTarballPath], {
     env: openclawEnv,
     name: "openclaw plugins install",
@@ -118,30 +197,16 @@ try {
   gatewayProcess = startDetachedProcess(["gateway", "run"], gatewayLogPath);
   await waitForGateway();
 
-  opikSearchStartTime = new Date().toISOString();
-  const agentRun = await runCommand(
-    ["agent", "--agent", "main", "--message", agentMessage],
-    {
-      env: openclawEnv,
-      name: "openclaw agent",
-      captureOutput: true,
-    },
-  );
-  await fs.writeFile(agentOutputPath, agentRun.output, "utf8");
-
-  if (agentRun.output.includes("falling back to embedded")) {
-    throw new Error("gateway turn fell back to embedded mode");
-  }
-  if (!agentRun.output.toLowerCase().includes("pong")) {
-    throw new Error("agent output did not contain the expected pong response");
+  const results = [];
+  for (const scenario of scenarios) {
+    const result = await runScenario(scenario);
+    results.push(result);
   }
 
-  const { traces, spans } = await verifyOpikExport();
-  await fs.writeFile(tracesPath, JSON.stringify(traces, null, 2), "utf8");
-  await fs.writeFile(spansPath, JSON.stringify(spans, null, 2), "utf8");
+  await fs.writeFile(resultsPath, JSON.stringify(results, null, 2), "utf8");
 
   console.log(
-    `[live-e2e] PASS runId=${runId} traces=${traces.length} spans=${spans.length} artifacts=${artifactDir}`,
+    `[live-e2e] PASS runId=${runId} scenarios=${results.length} artifacts=${artifactDir}`,
   );
 } catch (error) {
   console.error(`[live-e2e] FAIL: ${formatError(error)}`);
@@ -149,6 +214,68 @@ try {
   process.exitCode = 1;
 } finally {
   await stopGateway(gatewayProcess);
+}
+
+async function runScenario(scenario) {
+  const scenarioDir = path.join(artifactDir, scenario.id);
+  const agentOutputPath = path.join(scenarioDir, "agent-output.log");
+  const tracesPath = path.join(scenarioDir, "opik-traces.json");
+  const spansPath = path.join(scenarioDir, "opik-spans.json");
+  const tokenPrefix = scenario.id === "tool-exec" ? "tool-token" : "token";
+  const promptToken = `${tokenPrefix}-${randomUUID().slice(0, 8)}`;
+  const agentMessage = scenario.buildPrompt(promptToken);
+
+  await fs.mkdir(scenarioDir, { recursive: true });
+
+  console.log(`[live-e2e] scenario start: ${scenario.id}`);
+  const opikSearchStartTime = new Date().toISOString();
+  const agentRun = await runCommand(["agent", "--agent", "main", "--message", agentMessage], {
+    env: openclawEnv,
+    name: `openclaw agent (${scenario.id})`,
+    captureOutput: true,
+  });
+  await fs.writeFile(agentOutputPath, agentRun.output, "utf8");
+
+  if (agentRun.output.includes("falling back to embedded")) {
+    throw new Error(`gateway turn fell back to embedded mode during ${scenario.id}`);
+  }
+  scenario.assertAgentOutput(agentRun.output, promptToken);
+
+  const { traces, spans } = await verifyOpikExport({
+    promptToken,
+    startedAt: opikSearchStartTime,
+    minSpanCount: scenario.minSpanCount,
+  });
+
+  await fs.writeFile(tracesPath, JSON.stringify(traces, null, 2), "utf8");
+  await fs.writeFile(spansPath, JSON.stringify(spans, null, 2), "utf8");
+
+  scenario.assertExport({ traces, spans, promptToken });
+
+  const traceSummary = traces.map((trace) => ({
+    id: trace.id,
+    spanCount: trace.spanCount,
+    llmSpanCount: trace.llmSpanCount,
+    hasToolSpans: trace.hasToolSpans,
+  }));
+  const spanSummary = spans.map((span) => ({
+    id: span.id,
+    parentSpanId: span.parentSpanId,
+    name: span.name,
+    type: span.type,
+    traceId: span.traceId,
+  }));
+
+  console.log(
+    `[live-e2e] scenario pass: ${scenario.id} traces=${traces.length} spans=${spans.length}`,
+  );
+
+  return {
+    scenario: scenario.id,
+    promptToken,
+    traces: traceSummary,
+    spans: spanSummary,
+  };
 }
 
 async function packPlugin() {
@@ -268,7 +395,7 @@ async function stopGateway(gateway) {
   }
 }
 
-async function verifyOpikExport() {
+async function verifyOpikExport(params) {
   const client = new Opik({
     apiKey: opikApiKey,
     apiUrl: opikApiUrl,
@@ -276,7 +403,7 @@ async function verifyOpikExport() {
     workspaceName: opikWorkspaceName,
   });
 
-  const startedAtFilter = escapeOqlString(opikSearchStartTime);
+  const startedAtFilter = escapeOqlString(params.startedAt);
   const traceFilter = `metadata.created_from = "openclaw" AND start_time >= "${startedAtFilter}"`;
 
   const traces = await client.searchTraces({
@@ -286,8 +413,12 @@ async function verifyOpikExport() {
     waitForTimeout: 90,
     maxResults: 20,
   });
-  const matchingTrace = traces.find((trace) => serializedContains(trace.input, promptToken));
-  if (!matchingTrace) {
+  const matchingTraces = traces.filter(
+    (trace) =>
+      serializedContains(trace.input, params.promptToken) ||
+      serializedContains(trace.output, params.promptToken),
+  );
+  if (matchingTraces.length < 1) {
     throw new Error(`no live Opik traces matched filter: ${traceFilter}`);
   }
 
@@ -295,20 +426,24 @@ async function verifyOpikExport() {
   const spans = await client.searchSpans({
     projectName: opikProjectName,
     filterString: spanFilter,
-    waitForAtLeast: 1,
+    waitForAtLeast: params.minSpanCount,
     waitForTimeout: 90,
-    maxResults: 30,
+    maxResults: 50,
   });
+  const traceIds = new Set(matchingTraces.map((trace) => trace.id).filter(Boolean));
   const matchingSpans = spans.filter(
     (span) =>
-      (matchingTrace.id && span.traceId === matchingTrace.id) ||
-      serializedContains(span.input, promptToken),
+      traceIds.has(span.traceId) ||
+      serializedContains(span.input, params.promptToken) ||
+      serializedContains(span.output, params.promptToken),
   );
-  if (matchingSpans.length < 1) {
-    throw new Error(`no live Opik spans matched filter: ${spanFilter}`);
+  if (matchingSpans.length < params.minSpanCount) {
+    throw new Error(
+      `expected at least ${params.minSpanCount} live Opik spans, got ${matchingSpans.length}`,
+    );
   }
 
-  return { traces: [matchingTrace], spans: matchingSpans };
+  return { traces: matchingTraces, spans: matchingSpans };
 }
 
 function escapeOqlString(value) {
@@ -331,6 +466,16 @@ function resolveConfigValue(params) {
     return { value: params.fallbackValue, source: params.fallbackSource };
   }
   return { value: undefined, source: "unset" };
+}
+
+function parseScenarioIds(rawValue) {
+  if (typeof rawValue !== "string" || rawValue.trim().length === 0) {
+    return [];
+  }
+  return rawValue
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 async function readJsonIfExists(file) {
