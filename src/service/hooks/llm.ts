@@ -21,7 +21,7 @@ type LlmHooksDeps = {
   closeActiveTrace: (active: ActiveTrace, reason: string) => void;
   forgetSessionCorrelation: (sessionKey: string) => void;
   applyContextMeta: (active: ActiveTrace, ctx: Record<string, unknown>) => void;
-  resolveSessionKey: (ctx: Record<string, unknown>) => string | undefined;
+  resolveSessionKey: (ctx: Record<string, unknown>, sessionIdOverride?: string) => string | undefined;
   safeSpanUpdate: (span: Span, payload: Record<string, unknown>, reason: string) => void;
   safeSpanEnd: (span: Span, reason: string) => void;
   scheduleMediaAttachmentUploads: (params: {
@@ -39,10 +39,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
   deps.api.on("llm_input", (event, agentCtx) => {
     const client = deps.getClient();
     const agentCtxObj = agentCtx as Record<string, unknown>;
-    const sessionKey = deps.resolveSessionKey({
-      ...agentCtxObj,
-      sessionId: asNonEmptyString(event.sessionId) ?? agentCtxObj.sessionId,
-    });
+    const sessionKey = deps.resolveSessionKey(agentCtxObj, asNonEmptyString(event.sessionId));
     if (!client) return;
     if (!sessionKey) {
       deps.warn("opik: llm_input missing sessionKey");
