@@ -132,11 +132,14 @@ export function createOpikService(
     }
   }
 
-  function resolveSessionKey(ctx: Record<string, unknown>): string | undefined {
+  function resolveSessionKey(
+    ctx: Record<string, unknown>,
+    sessionIdOverride?: string,
+  ): string | undefined {
     const explicitSessionKey = asNonEmptyString(ctx.sessionKey);
     if (explicitSessionKey) return explicitSessionKey;
 
-    const sessionId = asNonEmptyString(ctx.sessionId);
+    const sessionId = sessionIdOverride ?? asNonEmptyString(ctx.sessionId);
     if (sessionId) return sessionId;
 
     const agentId = asNonEmptyString(ctx.agentId);

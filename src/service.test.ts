@@ -500,6 +500,34 @@ describe("opik service", () => {
       );
     });
 
+    test("prefers llm_input event.sessionId over ctx.sessionId when sessionKey is absent", async () => {
+      const { api, hooks } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        {
+          model: "gpt-4",
+          provider: "openai",
+          prompt: "Hello",
+          sessionId: "event-session-id",
+          historyMessages: [],
+        },
+        agentCtx(undefined, { sessionId: "ctx-session-id" }),
+      );
+
+      expect(mockTraceFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: "event-session-id",
+          metadata: expect.objectContaining({
+            sessionId: "event-session-id",
+          }),
+        }),
+      );
+    });
+
     test("normalizes openai-codex provider to openai on trace/span creation", async () => {
       const { api, hooks } = createApi();
       const mockTrace = opikState.createMockTrace();
