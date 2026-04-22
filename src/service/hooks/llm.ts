@@ -52,6 +52,8 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
     const normalizedProvider = normalizeProvider(event.provider) ?? event.provider;
     const channelId = resolveChannelId(agentCtxObj);
     const trigger = resolveTrigger(agentCtxObj);
+    const projectName = deps.getProjectName();
+    const tags = deps.getTags();
 
     const existing = deps.activeTraces.get(sessionKey);
     let trace: Trace;
@@ -70,7 +72,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
         }) as Record<string, unknown>;
         trace = client.trace({
           name: `${event.model} · ${channelId ?? "unknown"}`,
-          projectName: deps.getProjectName(),
+          projectName,
           threadId: sessionKey,
           input: sanitizedTraceInput,
           metadata: {
@@ -83,7 +85,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
             ...(channelId ? { channel: channelId, channelId } : {}),
             ...(trigger ? { trigger } : {}),
           },
-          tags: deps.getTags().length > 0 ? deps.getTags() : undefined,
+          tags: tags.length > 0 ? tags : undefined,
         });
       } catch (err) {
         deps.warn(
@@ -141,7 +143,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
     deps.scheduleMediaAttachmentUploads({
       entityType: "trace",
       entity: trace,
-      projectName: deps.getProjectName(),
+      projectName,
       reason: `llm_input sessionKey=${sessionKey}`,
       payloads: [event.prompt, Array.isArray(event.historyMessages) ? event.historyMessages.at(-1) : undefined],
     });
