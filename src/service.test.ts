@@ -470,6 +470,36 @@ describe("opik service", () => {
       );
     });
 
+    test("passes the configured project name when creating traces", async () => {
+      const { api, hooks } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(
+        createServiceContext(true, {
+          enabled: true,
+          apiKey: "test-key",
+          projectName: "team-project",
+        }) as any,
+      );
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        {
+          model: "gpt-4",
+          provider: "openai",
+          prompt: "Hello",
+          historyMessages: [],
+        },
+        agentCtx("session-1"),
+      );
+
+      expect(mockTraceFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectName: "team-project",
+        }),
+      );
+    });
+
     test("normalizes openai-codex provider to openai on trace/span creation", async () => {
       const { api, hooks } = createApi();
       const mockTrace = opikState.createMockTrace();
