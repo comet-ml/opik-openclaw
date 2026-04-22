@@ -25,8 +25,13 @@ const received = {
   endedSpans: 0,
   tracePatches: 0,
   spanPatches: 0,
+  traceProjects: new Set(),
   requests: [],
 };
+
+function resolveEntityProject(entity) {
+  return entity?.projectName ?? entity?.project_name ?? null;
+}
 
 function redactHeaders(headers) {
   const entries = Object.entries(headers ?? {});
@@ -43,6 +48,7 @@ function redactHeaders(headers) {
 function buildRequestSummary(method, url, body) {
   if (method === "POST" && url.includes("/traces/batch")) {
     const traces = body?.traces ?? [];
+    const traceProjects = [...new Set(traces.map(resolveEntityProject).filter(Boolean))];
     return {
       route: "traces-batch",
       traceCount: traces.length,
@@ -50,6 +56,7 @@ function buildRequestSummary(method, url, body) {
         (trace) => trace?.endTime !== undefined || trace?.end_time !== undefined,
       ).length,
       traceIds: traces.map((trace) => trace?.id).filter(Boolean).slice(0, 5),
+      traceProjects,
     };
   }
   if (method === "POST" && url.includes("/spans/batch")) {
@@ -93,6 +100,12 @@ function record(method, url, body, headers) {
     const traces = body?.traces ?? [];
     received.traces += traces.length;
     received.endedTraces += traces.filter((trace) => trace?.endTime !== undefined || trace?.end_time !== undefined).length;
+    for (const trace of traces) {
+      const projectName = resolveEntityProject(trace);
+      if (projectName) {
+        received.traceProjects.add(projectName);
+      }
+    }
   } else if (method === "POST" && url.includes("/spans/batch")) {
     const spans = body?.spans ?? [];
     received.spans += spans.length;
@@ -148,6 +161,7 @@ function writeResult() {
     endedSpans: received.endedSpans,
     tracePatches: received.tracePatches,
     spanPatches: received.spanPatches,
+    traceProjects: [...received.traceProjects].sort(),
     totalRequests: received.requests.length,
   };
   fs.writeFileSync(RESULT_FILE, JSON.stringify(summary, null, 2));

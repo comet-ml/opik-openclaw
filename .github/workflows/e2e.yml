@@ -49,6 +49,7 @@ jobs:
       E2E_LLM_RESULT_FILE: e2e-llm-result.json
       E2E_OPIK_JOURNAL_FILE: e2e-opik-journal.json
       E2E_LLM_JOURNAL_FILE: e2e-llm-journal.json
+      E2E_EXPECTED_OPIK_PROJECT: e2e-test
       OPENCLAW_GATEWAY_TOKEN: e2e-test-token
 
     steps:
