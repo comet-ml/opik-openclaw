@@ -8,17 +8,21 @@
     "url": "https://github.com/comet-ml/opik-openclaw"
   },
   "type": "module",
+  "types": "./dist/index.d.ts",
   "engines": {
     "node": ">=22.12.0",
     "npm": ">=10"
   },
   "scripts": {
+    "build": "node scripts/build.mjs",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "vitest run src/**/*.e2e.test.ts",
     "test:live": "node scripts/live-e2e.mjs",
-    "smoke": "vitest run src/plugin.smoke.test.ts"
+    "smoke": "vitest run src/plugin.smoke.test.ts",
+    "pack:check": "node scripts/check-pack-payload.mjs",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@clack/prompts": "^1.0.1",
@@ -35,7 +39,9 @@
     "vitest": "^4.0.18"
   },
   "files": [
+    "dist/**",
     "index.ts",
+    "src/cli.ts",
     "src/configure.ts",
     "src/service.ts",
     "src/service/constants.ts",
@@ -54,6 +60,17 @@
   "openclaw": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.3.2",
+      "minGatewayVersion": "2026.3.2"
+    },
+    "build": {
+      "openclawVersion": "2026.3.2",
+      "pluginSdkVersion": "2026.3.2"
+    }
   }
 }

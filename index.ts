@@ -1,12 +1,8 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
-import { disableLogger } from "opik";
-import { registerOpikCli } from "./src/configure.js";
+import { registerOpikCli } from "./src/cli.js";
 import { createOpikService, type OpikRuntimeService } from "./src/service.js";
 import { parseOpikPluginConfig } from "./src/types.js";
-
-// Suppress Opik SDK tslog console output
-disableLogger();
 
 const plugin = {
   id: "opik-openclaw",

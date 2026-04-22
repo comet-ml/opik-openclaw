@@ -4,7 +4,7 @@ import type {
   OpenClawPluginService,
 } from "openclaw/plugin-sdk";
 import { onDiagnosticEvent } from "openclaw/plugin-sdk";
-import { Opik, type Span, type Trace } from "opik";
+import type { Opik, Span, Trace } from "opik";
 import { createAttachmentUploader } from "./service/attachment-uploader.js";
 import { registerLlmHooks } from "./service/hooks/llm.js";
 import { registerSubagentHooks } from "./service/hooks/subagent.js";
@@ -663,6 +663,9 @@ export function createOpikService(
       flushRetryBaseDelayMs = asNonNegativeNumber(opikCfg.flushRetryBaseDelayMs) ??
         DEFAULT_FLUSH_RETRY_BASE_DELAY_MS;
 
+      const { disableLogger, Opik } = await import("opik");
+      // Suppress Opik SDK tslog console output once the exporter actually starts.
+      disableLogger();
       client = new Opik({
         apiKey,
         ...(apiUrl ? { apiUrl } : {}),

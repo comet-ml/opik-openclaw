@@ -7,10 +7,6 @@ type ConfigDeps = {
   writeConfigFile: (cfg: OpenClawConfig) => Promise<void>;
 };
 
-type RegisterOpikCliParams = {
-  program: any;
-} & ConfigDeps;
-
 /** Opik Cloud host (matches SDK's DEFAULT_HOST_URL). */
 const OPIK_CLOUD_HOST = "https://www.comet.com/";
 const OPIK_CLOUD_SIGNUP_URL = "https://www.comet.com/signup?from=llm&source=openclaw";
@@ -240,7 +236,7 @@ async function promptAndValidateUrl(placeholder: string): Promise<string> {
 // Interactive configure wizard (mirrors opik SDK getOrAskForProjectData)
 // ---------------------------------------------------------------------------
 
-async function runOpikConfigure(deps: ConfigDeps): Promise<void> {
+export async function runOpikConfigure(deps: ConfigDeps): Promise<void> {
   p.intro("Opik setup");
 
   // Step 1: Check if local Opik is already running (for hint in selector)
@@ -429,29 +425,4 @@ export function showOpikStatus(deps: ConfigDeps): void {
 
   console.log("Opik status:\n");
   console.log(lines.join("\n"));
-}
-
-// ---------------------------------------------------------------------------
-// CLI registration
-// ---------------------------------------------------------------------------
-
-export function registerOpikCli(params: RegisterOpikCliParams): void {
-  const { program, loadConfig, writeConfigFile } = params;
-  const deps: ConfigDeps = { loadConfig, writeConfigFile };
-
-  const root = program.command("opik").description("Opik trace export integration");
-
-  root
-    .command("configure")
-    .description("Interactive setup for Opik trace export")
-    .action(async () => {
-      await runOpikConfigure(deps);
-    });
-
-  root
-    .command("status")
-    .description("Show current Opik configuration")
-    .action(() => {
-      showOpikStatus(deps);
-    });
 }

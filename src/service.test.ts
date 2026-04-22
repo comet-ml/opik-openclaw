@@ -33,6 +33,7 @@ const mockWaitForUploads = vi.hoisted(() => vi.fn().mockResolvedValue(undefined)
 const mockResetAttachments = vi.hoisted(() => vi.fn());
 
 vi.mock("opik", () => ({
+  disableLogger: vi.fn(),
   Opik: class {
     trace = mockTraceFn;
     flush = mockFlush;

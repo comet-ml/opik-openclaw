@@ -73,4 +73,14 @@ describe("plugin smoke", () => {
 
     expect(packageJson.dependencies?.zod).toBeTruthy();
   });
+
+  test("package declares built runtime entry for installed OpenClaw loads", () => {
+    const packageJsonPath = new URL("../package.json", import.meta.url);
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+
+    expect(packageJson.openclaw?.extensions).toEqual(["./index.ts"]);
+    expect(packageJson.openclaw?.runtimeExtensions).toEqual(["./dist/index.js"]);
+    expect(packageJson.files).toContain("dist/**");
+    expect(packageJson.scripts?.prepack).toBe("npm run build");
+  });
 });

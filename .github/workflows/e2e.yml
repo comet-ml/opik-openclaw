@@ -20,6 +20,9 @@ on:
       - "src/**"
       - "scripts/**"
       - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "tsconfig.build.json"
   pull_request:
     branches: [main]
     paths:
@@ -28,6 +31,9 @@ on:
       - "src/**"
       - "scripts/**"
       - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "tsconfig.build.json"
   schedule:
     - cron: '0 6 * * *'  # daily at 6am UTC — catches new OpenClaw releases breaking the plugin
   workflow_dispatch:
