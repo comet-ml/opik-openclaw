@@ -10,6 +10,7 @@ const RESULT_FILE = process.env.E2E_RESULT_FILE ?? "e2e-result.json";
 const LLM_RESULT_FILE = process.env.E2E_LLM_RESULT_FILE ?? "e2e-llm-result.json";
 const OPIK_JOURNAL_FILE = process.env.E2E_OPIK_JOURNAL_FILE ?? "e2e-opik-journal.json";
 const LLM_JOURNAL_FILE = process.env.E2E_LLM_JOURNAL_FILE ?? "e2e-llm-journal.json";
+const EXPECTED_OPIK_PROJECT = process.env.E2E_EXPECTED_OPIK_PROJECT?.trim() || null;
 
 function readJsonIfExists(file) {
   return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
@@ -23,7 +24,7 @@ function formatRecentRequests(label, journal) {
   const lines = recent.map((entry) => {
     const summary =
       entry.route === "traces-batch"
-        ? `traceCount=${entry.traceCount ?? 0} finalized=${entry.finalizedTraceCount ?? 0}`
+        ? `traceCount=${entry.traceCount ?? 0} finalized=${entry.finalizedTraceCount ?? 0} projects=${(entry.traceProjects ?? []).join(",") || "unknown"}`
         : entry.route === "spans-batch"
           ? `spanCount=${entry.spanCount ?? 0} finalized=${entry.finalizedSpanCount ?? 0}`
           : entry.route === "responses" || entry.route === "chat-completions"
@@ -89,6 +90,24 @@ if (llmGenerationRequests < 1) {
   );
 }
 
+if (EXPECTED_OPIK_PROJECT) {
+  const traceProjects = Array.isArray(result.traceProjects)
+    ? result.traceProjects.filter((value) => typeof value === "string" && value.length > 0)
+    : [];
+  if (!traceProjects.includes(EXPECTED_OPIK_PROJECT)) {
+    failures.push(
+      `Expected traces routed to project "${EXPECTED_OPIK_PROJECT}", got ${traceProjects.length > 0 ? traceProjects.join(", ") : "none"}`,
+    );
+  }
+
+  const unexpectedTraceProjects = traceProjects.filter((project) => project !== EXPECTED_OPIK_PROJECT);
+  if (unexpectedTraceProjects.length > 0) {
+    failures.push(
+      `Expected only project "${EXPECTED_OPIK_PROJECT}" in trace batches, got extra projects: ${unexpectedTraceProjects.join(", ")}`,
+    );
+  }
+}
+
 if (failures.length > 0) {
   console.error("[check-e2e] FAIL:");
   for (const f of failures) console.error("  •", f);
@@ -97,4 +116,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("[check-e2e] PASS — traces, spans, patches, and mock LLM traffic were observed");
+console.log(
+  `[check-e2e] PASS — traces, spans, patches, mock LLM traffic, and project routing${EXPECTED_OPIK_PROJECT ? ` (${EXPECTED_OPIK_PROJECT})` : ""} were observed`,
+);
