@@ -80,6 +80,8 @@ describe("plugin smoke", () => {
 
     expect(packageJson.openclaw?.extensions).toEqual(["./index.ts"]);
     expect(packageJson.openclaw?.runtimeExtensions).toEqual(["./dist/index.js"]);
+    expect(packageJson.openclaw?.compat?.pluginApi).toBeTruthy();
+    expect(packageJson.openclaw?.build?.openclawVersion).toBeTruthy();
     expect(packageJson.files).toContain("dist/**");
     expect(packageJson.scripts?.prepack).toBe("npm run build");
   });

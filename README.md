@@ -185,8 +185,10 @@ npm run smoke
 The package publishes built JavaScript for installed OpenClaw runtime loads while
 keeping TypeScript source metadata for development and older OpenClaw fallback
 loads. `openclaw.extensions` points at `./index.ts`; `openclaw.runtimeExtensions`
-points at `./dist/index.js`. `npm pack` and `npm publish` run `npm run build`
-through `prepack`, and `npm run pack:check` verifies the tarball contract.
+points at `./dist/index.js`. ClawHub also requires explicit
+`openclaw.compat.pluginApi` and `openclaw.build.openclawVersion` metadata.
+`npm pack` and `npm publish` run `npm run build` through `prepack`, and
+`npm run pack:check` verifies the tarball contract.
 Pull requests also dry-run the ClawHub package publish workflow, and GitHub
 releases publish the validated package to both npm and ClawHub.
 

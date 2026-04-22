@@ -40,6 +40,8 @@ const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const expectedExtensions = ["./index.ts"];
 const expectedRuntimeExtensions = ["./dist/index.js"];
 const issues = [];
+const compatPluginApi = packageJson.openclaw?.compat?.pluginApi;
+const buildOpenClawVersion = packageJson.openclaw?.build?.openclawVersion;
 
 function listFilesRecursively(rootDir) {
   if (!fs.existsSync(rootDir)) {
@@ -107,6 +109,12 @@ requireStringArray(
   packageJson.openclaw?.runtimeExtensions,
   expectedRuntimeExtensions,
 );
+if (typeof compatPluginApi !== "string" || compatPluginApi.trim().length === 0) {
+  issues.push("openclaw.compat.pluginApi must be a non-empty string");
+}
+if (typeof buildOpenClawVersion !== "string" || buildOpenClawVersion.trim().length === 0) {
+  issues.push("openclaw.build.openclawVersion must be a non-empty string");
+}
 if (!packageJson.files?.includes("dist/**")) {
   issues.push("package files must include dist/**");
 }
