@@ -594,6 +594,9 @@ describe("opik service", () => {
       expect(traceInput.systemPrompt).toBe("use media:<image-ref> for docs examples");
 
       const llmSpanInput = (mockTrace.span.mock.calls[0][0] as any).input;
+      expect(llmSpanInput.prompt).toBe("send media:<image-ref>");
+      expect(llmSpanInput.systemPrompt).toBe("use media:<image-ref> for docs examples");
+      expect(llmSpanInput.imagesCount).toBe(0);
       expect(llmSpanInput.historyMessages[0].content).toBe("example media:<image-ref>");
     });
 

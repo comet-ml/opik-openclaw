@@ -51,6 +51,11 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
     const trigger = resolveTrigger(agentCtxObj);
     const projectName = deps.getProjectName();
     const tags = deps.getTags();
+    const sanitizedSharedLlmInput = sanitizeValueForOpik({
+      prompt: event.prompt,
+      systemPrompt: event.systemPrompt,
+      imagesCount: event.imagesCount,
+    }) as Record<string, unknown>;
 
     const existing = deps.activeTraces.get(sessionKey);
     let trace: Trace;
@@ -62,16 +67,11 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
       }
     } else {
       try {
-        const sanitizedTraceInput = sanitizeValueForOpik({
-          prompt: event.prompt,
-          systemPrompt: event.systemPrompt,
-          imagesCount: event.imagesCount,
-        }) as Record<string, unknown>;
         trace = client.trace({
           name: `${event.model} · ${channelId ?? "unknown"}`,
           projectName,
           threadId: sessionKey,
-          input: sanitizedTraceInput,
+          input: sanitizedSharedLlmInput,
           metadata: {
             created_from: OPIK_CREATED_FROM,
             provider: normalizedProvider,
@@ -94,12 +94,13 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
 
     let llmSpan: Span | null = null;
     try {
-      const sanitizedLlmInput = sanitizeValueForOpik({
-        prompt: event.prompt,
-        systemPrompt: event.systemPrompt,
-        historyMessages: event.historyMessages,
-        imagesCount: event.imagesCount,
-      }) as Record<string, unknown>;
+      const sanitizedHistoryMessages = sanitizeValueForOpik(event.historyMessages);
+      const sanitizedLlmInput = {
+        ...sanitizedSharedLlmInput,
+        ...(sanitizedHistoryMessages === undefined
+          ? {}
+          : { historyMessages: sanitizedHistoryMessages }),
+      } as Record<string, unknown>;
       llmSpan = trace.span({
         name: event.model,
         type: "llm",
