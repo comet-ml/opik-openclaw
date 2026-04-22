@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/ci.yml"
+      - ".github/workflows/release.yml"
       - "package.json"
       - "package-lock.json"
       - "tsconfig.json"
@@ -22,6 +23,7 @@ on:
       - main
     paths:
       - ".github/workflows/ci.yml"
+      - ".github/workflows/release.yml"
       - "package.json"
       - "package-lock.json"
       - "tsconfig.json"
@@ -71,3 +73,12 @@ jobs:
 
       - name: Verify package payload
         run: npm run pack:check
+
+  clawhub-dry-run:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      id-token: write
+    uses: openclaw/clawhub/.github/workflows/package-publish.yml@main
+    with:
+      dry_run: true

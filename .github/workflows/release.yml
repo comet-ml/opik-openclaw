@@ -4,26 +4,38 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example v0.2.12
+        required: true
+        type: string
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
-  publish:
+  validate:
     runs-on: ubuntu-latest
+    outputs:
+      package_name: ${{ steps.verify.outputs.package_name }}
+      package_version: ${{ steps.verify.outputs.package_version }}
+      tag_name: ${{ steps.verify.outputs.tag_name }}
+      npm_already_published: ${{ steps.npm_exists.outputs.already_published }}
+      clawhub_already_published: ${{ steps.clawhub_exists.outputs.already_published }}
+      tarball_name: ${{ steps.pack.outputs.tarball_name }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: "22.14.0"
-          cache: "npm"
           registry-url: "https://registry.npmjs.org"
 
       - name: Setup npm
@@ -31,13 +43,14 @@ jobs:
 
       - name: Validate release tag matches package version
         id: verify
+        env:
+          TAG_NAME: ${{ inputs.tag || github.event.release.tag_name }}
         run: |
           PACKAGE_NAME="$(node -p "require('./package.json').name")"
           PACKAGE_VERSION="$(node -p "require('./package.json').version")"
-          TAG_NAME="${{ github.event.release.tag_name }}"
 
           if [ -z "$TAG_NAME" ]; then
-            echo "release.tag_name is empty. This workflow only publishes from a GitHub Release."
+            echo "tag input is required for workflow_dispatch, and release.tag_name is required for release runs."
             exit 1
           fi
 
@@ -53,9 +66,10 @@ jobs:
 
           echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Check if this version is already published
-        id: exists
+      - name: Check if this version is already published to npm
+        id: npm_exists
         run: |
           if npm view "${{ steps.verify.outputs.package_name }}@${{ steps.verify.outputs.package_version }}" version >/dev/null 2>&1; then
             echo "already_published=true" >> "$GITHUB_OUTPUT"
@@ -63,51 +77,137 @@ jobs:
             echo "already_published=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check if this version is already published to ClawHub
+        id: clawhub_exists
+        env:
+          PACKAGE_NAME: ${{ steps.verify.outputs.package_name }}
+          PACKAGE_VERSION: ${{ steps.verify.outputs.package_version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          package_name = os.environ["PACKAGE_NAME"].strip()
+          package_version = os.environ["PACKAGE_VERSION"].strip()
+          url = f"https://clawhub.ai/api/v1/packages/{urllib.parse.quote(package_name, safe='')}"
+
+          already_published = False
+          try:
+              with urllib.request.urlopen(url) as response:
+                  payload = json.load(response)
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise
+              payload = {}
+
+          package = payload.get("package") or {}
+          latest_version = str(package.get("latestVersion") or "").strip()
+          tags = package.get("tags") or {}
+          latest_tag = str(tags.get("latest") or "").strip() if isinstance(tags, dict) else ""
+          already_published = latest_version == package_version or latest_tag == package_version
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"already_published={'true' if already_published else 'false'}\n")
+          PY
+
       - name: Install dependencies
-        if: steps.exists.outputs.already_published == 'false'
+        if: steps.npm_exists.outputs.already_published != 'true' || steps.clawhub_exists.outputs.already_published != 'true'
         run: npm ci
 
       - name: Run build
-        if: steps.exists.outputs.already_published == 'false'
+        if: steps.npm_exists.outputs.already_published != 'true' || steps.clawhub_exists.outputs.already_published != 'true'
         run: npm run build
 
       - name: Run lint
-        if: steps.exists.outputs.already_published == 'false'
+        if: steps.npm_exists.outputs.already_published != 'true' || steps.clawhub_exists.outputs.already_published != 'true'
         run: npm run lint
 
       - name: Run typecheck
-        if: steps.exists.outputs.already_published == 'false'
+        if: steps.npm_exists.outputs.already_published != 'true' || steps.clawhub_exists.outputs.already_published != 'true'
         run: npm run typecheck
 
       - name: Run tests
-        if: steps.exists.outputs.already_published == 'false'
+        if: steps.npm_exists.outputs.already_published != 'true' || steps.clawhub_exists.outputs.already_published != 'true'
         run: npm run test
 
       - name: Run smoke tests
-        if: steps.exists.outputs.already_published == 'false'
+        if: steps.npm_exists.outputs.already_published != 'true' || steps.clawhub_exists.outputs.already_published != 'true'
         run: npm run smoke
 
       - name: Verify package payload
-        if: steps.exists.outputs.already_published == 'false'
+        if: steps.npm_exists.outputs.already_published != 'true' || steps.clawhub_exists.outputs.already_published != 'true'
         run: npm run pack:check
 
+      - name: Pack npm release artifact
+        id: pack
+        if: steps.npm_exists.outputs.already_published != 'true'
+        run: |
+          TARBALL_NAME="$(npm pack --json | jq -r '.[0].filename')"
+          echo "tarball_name=$TARBALL_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload npm release artifact
+        if: steps.npm_exists.outputs.already_published != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-release-tarball
+          path: ${{ steps.pack.outputs.tarball_name }}
+          if-no-files-found: error
+
+      - name: Report already-published release state
+        if: steps.npm_exists.outputs.already_published == 'true' && steps.clawhub_exists.outputs.already_published == 'true'
+        run: |
+          echo "Skipping publish: ${{ steps.verify.outputs.package_name }}@${{ steps.verify.outputs.package_version }} is already published to npm and ClawHub."
+
+  publish-npm:
+    needs: validate
+    if: needs.validate.outputs.npm_already_published != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22.14.0"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Setup npm
+        run: npm install -g npm@11.6.2
+
+      - name: Download npm release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-release-tarball
+          path: ./release-artifacts
+
       - name: Prepare trusted publishing auth
-        if: steps.exists.outputs.already_published == 'false'
         run: |
           npm config delete //registry.npmjs.org/:_authToken || true
 
       - name: Publish to npm
-        if: steps.exists.outputs.already_published == 'false'
         run: |
           if [ "${{ github.event.repository.private }}" = "true" ]; then
-            npm publish --access public
+            npm publish "./release-artifacts/${{ needs.validate.outputs.tarball_name }}" --access public
           else
-            npm publish --provenance --access public
+            npm publish "./release-artifacts/${{ needs.validate.outputs.tarball_name }}" --provenance --access public
           fi
         env:
           NODE_AUTH_TOKEN: ""
 
-      - name: Report already-published release
-        if: steps.exists.outputs.already_published == 'true'
-        run: |
-          echo "Skipping publish: ${{ steps.verify.outputs.package_name }}@${{ steps.verify.outputs.package_version }} already exists on npm."
+  publish-clawhub:
+    needs: validate
+    if: needs.validate.outputs.clawhub_already_published != 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: openclaw/clawhub/.github/workflows/package-publish.yml@main
+    with:
+      dry_run: false
+      ref: ${{ needs.validate.outputs.tag_name }}
+      version: ${{ needs.validate.outputs.package_version }}
+      source_ref: refs/tags/${{ needs.validate.outputs.tag_name }}
+    secrets:
+      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
