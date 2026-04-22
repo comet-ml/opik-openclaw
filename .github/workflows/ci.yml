@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/ci.yml"
+      - ".github/workflows/clawhub-package-publish.yml"
       - ".github/workflows/release.yml"
       - "package.json"
       - "package-lock.json"
@@ -23,6 +24,7 @@ on:
       - main
     paths:
       - ".github/workflows/ci.yml"
+      - ".github/workflows/clawhub-package-publish.yml"
       - ".github/workflows/release.yml"
       - "package.json"
       - "package-lock.json"
@@ -42,10 +44,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: '22.12.0'
           cache: 'npm'
@@ -79,6 +81,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: openclaw/clawhub/.github/workflows/package-publish.yml@main
+    uses: ./.github/workflows/clawhub-package-publish.yml
     with:
       dry_run: true
