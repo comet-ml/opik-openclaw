@@ -159,7 +159,7 @@ const resultsPath = path.join(artifactDir, "results.json");
 const gatewayPort = Number.parseInt(process.env.OPENCLAW_LIVE_GATEWAY_PORT ?? "18789", 10);
 const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN?.trim() || `live-${randomUUID()}`;
 const liveModel = process.env.OPENCLAW_LIVE_MODEL?.trim() || "gpt-4o-mini";
-const requestedOpenClawVersion = process.env.OPENCLAW_LIVE_OPENCLAW_VERSION?.trim() || "2026.4.15";
+const requestedOpenClawVersion = process.env.OPENCLAW_LIVE_OPENCLAW_VERSION?.trim() || "latest";
 
 const openclawInvocation = resolveOpenClawInvocation(requestedOpenClawVersion);
 const openclawEnv = {

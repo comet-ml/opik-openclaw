@@ -11,9 +11,11 @@ on:
       - "package.json"
       - "package-lock.json"
       - "tsconfig.json"
+      - "tsconfig.build.json"
       - "index.ts"
       - "openclaw.plugin.json"
       - "src/**"
+      - "scripts/check-pack-payload.mjs"
   push:
     branches:
       - main
@@ -22,9 +24,11 @@ on:
       - "package.json"
       - "package-lock.json"
       - "tsconfig.json"
+      - "tsconfig.build.json"
       - "index.ts"
       - "openclaw.plugin.json"
       - "src/**"
+      - "scripts/check-pack-payload.mjs"
   workflow_dispatch:
 
 jobs:
@@ -48,6 +52,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run build
+        run: npm run build
+
       - name: Run lint
         run: npm run lint
 
@@ -61,4 +68,4 @@ jobs:
         run: npm run smoke
 
       - name: Verify package payload
-        run: npm pack --dry-run
+        run: npm run pack:check

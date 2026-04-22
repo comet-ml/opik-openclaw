@@ -67,6 +67,10 @@ jobs:
         if: steps.exists.outputs.already_published == 'false'
         run: npm ci
 
+      - name: Run build
+        if: steps.exists.outputs.already_published == 'false'
+        run: npm run build
+
       - name: Run lint
         if: steps.exists.outputs.already_published == 'false'
         run: npm run lint
@@ -85,7 +89,7 @@ jobs:
 
       - name: Verify package payload
         if: steps.exists.outputs.already_published == 'false'
-        run: npm pack --dry-run
+        run: npm run pack:check
 
       - name: Prepare trusted publishing auth
         if: steps.exists.outputs.already_published == 'false'

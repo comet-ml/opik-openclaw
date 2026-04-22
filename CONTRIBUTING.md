@@ -40,11 +40,16 @@ cp .env.example .env
 Recommended local checks:
 
 ```bash
+npm run build
 npm run lint
 npm run typecheck
 npm run test
 npm run smoke
 ```
+
+Packaging changes should preserve the OpenClaw package contract: source metadata
+stays in `openclaw.extensions`, installed runtime code stays in
+`openclaw.runtimeExtensions`, and `npm run pack:check` must pass.
 
 ## Pull requests
 

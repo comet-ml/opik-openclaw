@@ -173,11 +173,20 @@ Prerequisites:
 
 ```bash
 npm ci
+npm run build
 npm run lint
 npm run typecheck
 npm run test
 npm run smoke
 ```
+
+### Packaging
+
+The package publishes built JavaScript for installed OpenClaw runtime loads while
+keeping TypeScript source metadata for development and older OpenClaw fallback
+loads. `openclaw.extensions` points at `./index.ts`; `openclaw.runtimeExtensions`
+points at `./dist/index.js`. `npm pack` and `npm publish` run `npm run build`
+through `prepack`, and `npm run pack:check` verifies the tarball contract.
 
 Optional live gateway E2E:
 
@@ -193,7 +202,7 @@ Notes:
 - set `OPENCLAW_LIVE_USE_HOST_OPIK_CONFIG=0` to disable reading host plugin config and require explicit env-only Opik settings
 - still requires `OPENAI_API_KEY` in env for the real model call
 - packs and installs the current plugin build into a fresh OpenClaw home
-- falls back to `npx openclaw@${OPENCLAW_LIVE_OPENCLAW_VERSION:-2026.4.15}` when `openclaw` is not already on your `PATH`
+- falls back to `npx openclaw@${OPENCLAW_LIVE_OPENCLAW_VERSION:-latest}` when `openclaw` is not already on your `PATH`
 - override the live model with `OPENCLAW_LIVE_MODEL` if `gpt-4o-mini` is not what you want to exercise
 
 ## Contributing

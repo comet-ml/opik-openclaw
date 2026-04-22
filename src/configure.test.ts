@@ -3,10 +3,10 @@ import { describe, expect, test, vi } from "vitest";
 import {
   getOpikPluginEntry,
   getApiKeyHelpText,
-  registerOpikCli,
   setOpikPluginEntry,
   showOpikStatus,
 } from "./configure.js";
+import { registerOpikCli } from "./cli.js";
 
 describe("configure helpers", () => {
   test("setOpikPluginEntry writes plugins.entries.opik-openclaw", () => {
@@ -68,7 +68,6 @@ describe("configure helpers", () => {
 
 describe("opik status command", () => {
   test("reads plugin entry and masks api key", async () => {
-    const program = new Command();
     const loadConfig = () =>
       ({
         plugins: {
@@ -88,12 +87,6 @@ describe("opik status command", () => {
         },
       }) as any;
 
-    registerOpikCli({
-      program, // keep a smoke-level check that command registration still succeeds
-      loadConfig,
-      writeConfigFile: async () => undefined,
-    });
-
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     showOpikStatus({
       loadConfig,
@@ -106,8 +99,10 @@ describe("opik status command", () => {
     expect(output).not.toContain("secret-key");
   });
 
-  test("status command is registered under openclaw opik", () => {
+  test("status command runs through registered lazy CLI action", async () => {
     const program = new Command();
+    program.exitOverride();
+
     registerOpikCli({
       program,
       loadConfig: () =>
@@ -130,8 +125,18 @@ describe("opik status command", () => {
         }) as any,
       writeConfigFile: async () => undefined,
     });
-    const opikCommand = program.commands.find((cmd) => cmd.name() === "opik");
-    expect(opikCommand).toBeDefined();
-    expect(opikCommand?.commands.map((cmd) => cmd.name())).toContain("status");
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let output = "";
+    try {
+      await program.parseAsync(["node", "openclaw", "opik", "status"]);
+      output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    expect(output).toContain("Enabled:    yes");
+    expect(output).toContain("API key:    ***");
+    expect(output).not.toContain("secret-key");
   });
 });
