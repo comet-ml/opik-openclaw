@@ -27,13 +27,13 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ inputs.tag || github.event.release.tag_name }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: "22.14.0"
           registry-url: "https://registry.npmjs.org"
@@ -150,7 +150,7 @@ jobs:
 
       - name: Upload npm release artifact
         if: steps.npm_exists.outputs.already_published != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-release-tarball
           path: ${{ steps.pack.outputs.tarball_name }}
@@ -168,7 +168,7 @@ jobs:
 
     steps:
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: "22.14.0"
           registry-url: "https://registry.npmjs.org"
@@ -177,7 +177,7 @@ jobs:
         run: npm install -g npm@11.6.2
 
       - name: Download npm release artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: npm-release-tarball
           path: ./release-artifacts
@@ -202,7 +202,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: openclaw/clawhub/.github/workflows/package-publish.yml@main
+    uses: ./.github/workflows/clawhub-package-publish.yml
     with:
       dry_run: false
       ref: ${{ needs.validate.outputs.tag_name }}
