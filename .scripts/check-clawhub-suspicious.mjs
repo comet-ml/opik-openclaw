@@ -20,6 +20,10 @@ const { runStaticModerationScan } = await import(
 
 const ig = ignore();
 ig.add([".git/", "node_modules/", ".clawhub/", ".clawdhub/"]);
+const clawhubSourceRelPath = normalizePath(path.relative(pluginRoot, clawhubSourceDir));
+if (clawhubSourceRelPath && !clawhubSourceRelPath.startsWith("../") && clawhubSourceRelPath !== "..") {
+  ig.add(`${clawhubSourceRelPath}/`);
+}
 await addIgnoreFile(".clawhubignore");
 await addIgnoreFile(".clawdhubignore");
 
