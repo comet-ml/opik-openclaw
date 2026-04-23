@@ -18,7 +18,7 @@ on:
       - ".github/workflows/e2e.yml"
       - "index.ts"
       - "src/**"
-      - "scripts/**"
+      - ".scripts/**"
       - "package.json"
       - "package-lock.json"
       - "tsconfig.json"
@@ -29,7 +29,7 @@ on:
       - ".github/workflows/e2e.yml"
       - "index.ts"
       - "src/**"
-      - "scripts/**"
+      - ".scripts/**"
       - "package.json"
       - "package-lock.json"
       - "tsconfig.json"
@@ -183,14 +183,14 @@ jobs:
 
       - name: Start mock Opik server
         run: |
-          node scripts/mock-opik-server.mjs > mock-opik.log 2>&1 &
+          node .scripts/mock-opik-server.mjs > mock-opik.log 2>&1 &
           echo $! > mock-opik.pid
         env:
           MOCK_OPIK_PORT: "18791"
 
       - name: Start mock LLM server
         run: |
-          node scripts/mock-llm-server.mjs > mock-llm.log 2>&1 &
+          node .scripts/mock-llm-server.mjs > mock-llm.log 2>&1 &
           echo $! > mock-llm.pid
         env:
           MOCK_LLM_PORT: "18790"
@@ -245,7 +245,7 @@ jobs:
           sleep 1
 
       - name: Assert E2E results
-        run: node scripts/check-e2e-result.mjs
+        run: node .scripts/check-e2e-result.mjs
 
       - name: Upload E2E result on failure
         if: failure()

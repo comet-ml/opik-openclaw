@@ -1,0 +1,4 @@
+# Exclude repository automation and local development helpers from the
+# installable ClawHub plugin archive.
+.github/
+.scripts/

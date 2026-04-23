@@ -14,14 +14,14 @@
     "npm": ">=10"
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "node .scripts/build.mjs",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "vitest run src/**/*.e2e.test.ts",
-    "test:live": "node scripts/live-e2e.mjs",
+    "test:live": "node .scripts/live-e2e.mjs",
     "smoke": "vitest run src/plugin.smoke.test.ts",
-    "pack:check": "node scripts/check-pack-payload.mjs",
+    "pack:check": "node .scripts/check-pack-payload.mjs",
     "prepack": "npm run build"
   },
   "dependencies": {
