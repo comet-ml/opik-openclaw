@@ -17,8 +17,8 @@ on:
       - "index.ts"
       - "openclaw.plugin.json"
       - "src/**"
-      - "scripts/build.mjs"
-      - "scripts/check-pack-payload.mjs"
+      - ".scripts/build.mjs"
+      - ".scripts/check-pack-payload.mjs"
   push:
     branches:
       - main
@@ -33,8 +33,8 @@ on:
       - "index.ts"
       - "openclaw.plugin.json"
       - "src/**"
-      - "scripts/build.mjs"
-      - "scripts/check-pack-payload.mjs"
+      - ".scripts/build.mjs"
+      - ".scripts/check-pack-payload.mjs"
   workflow_dispatch:
 
 jobs:
