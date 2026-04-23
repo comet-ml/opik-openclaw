@@ -6,35 +6,9 @@ permissions:
 on:
   pull_request:
     branches: [main]
-    paths:
-      - ".github/workflows/ci.yml"
-      - ".github/workflows/clawhub-package-publish.yml"
-      - ".github/workflows/release.yml"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig.json"
-      - "tsconfig.build.json"
-      - "index.ts"
-      - "openclaw.plugin.json"
-      - "src/**"
-      - ".scripts/build.mjs"
-      - ".scripts/check-pack-payload.mjs"
   push:
     branches:
       - main
-    paths:
-      - ".github/workflows/ci.yml"
-      - ".github/workflows/clawhub-package-publish.yml"
-      - ".github/workflows/release.yml"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig.json"
-      - "tsconfig.build.json"
-      - "index.ts"
-      - "openclaw.plugin.json"
-      - "src/**"
-      - ".scripts/build.mjs"
-      - ".scripts/check-pack-payload.mjs"
   workflow_dispatch:
 
 jobs:
@@ -84,3 +58,33 @@ jobs:
     uses: ./.github/workflows/clawhub-package-publish.yml
     with:
       dry_run: true
+
+  clawhub-suspicious-check:
+    name: ClawHub suspicious scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout plugin source
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@e3914758a49697077f7bcd190d36582a61667aad
+        with:
+          bun-version: 1.3.10
+
+      - name: Checkout ClawHub scanner source
+        uses: actions/checkout@v6
+        with:
+          repository: openclaw/clawhub
+          ref: 4787be4eb1e06b4ffb947456a6559835a4307f7b
+          path: clawhub-source
+
+      - name: Install ClawHub scanner dependencies
+        working-directory: clawhub-source
+        run: bun install --frozen-lockfile
+
+      - name: Run ClawHub suspicious scan
+        env:
+          CLAWHUB_SOURCE_DIR: clawhub-source
+        run: bun --bun .scripts/check-clawhub-suspicious.mjs .
