@@ -38,6 +38,10 @@
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
+  "overrides": {
+    "@anthropic-ai/sdk": "^0.92.0",
+    "uuid": "^14.0.0"
+  },
   "files": [
     "dist/**",
     "index.ts",
