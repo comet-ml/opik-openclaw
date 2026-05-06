@@ -93,6 +93,9 @@ Then confirm traces in your Opik project.
     "entries": {
       "opik-openclaw": {
         "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
         "config": {
           // base configuration
           "enabled": true,
@@ -123,6 +126,22 @@ OpenClaw warns when `plugins.allow` is empty and a community plugin is discovere
 {
   "plugins": {
     "allow": ["opik-openclaw"]
+  }
+}
+```
+
+Because Opik traces LLM prompts, responses, tools, and agent finalization events, non-bundled installs also need explicit conversation hook access:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "opik-openclaw": {
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      }
+    }
   }
 }
 ```

@@ -314,6 +314,9 @@ async function writeOpenClawConfig(params) {
       entries: {
         "opik-openclaw": {
           enabled: true,
+          hooks: {
+            allowConversationAccess: true,
+          },
           config: {
             enabled: true,
             apiUrl: opikApiUrl,

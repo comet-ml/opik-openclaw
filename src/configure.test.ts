@@ -24,6 +24,9 @@ describe("configure helpers", () => {
     ) as any;
 
     expect(next.plugins.entries["opik-openclaw"].enabled).toBe(true);
+    expect(next.plugins.entries["opik-openclaw"].hooks).toEqual({
+      allowConversationAccess: true,
+    });
     expect(next.plugins.entries["opik-openclaw"].config).toEqual({
       enabled: true,
       apiKey: "test-key",

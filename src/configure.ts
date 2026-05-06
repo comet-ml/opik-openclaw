@@ -52,6 +52,10 @@ export function setOpikPluginEntry(
     [OPIK_PLUGIN_ID]: {
       ...existingEntry,
       enabled,
+      hooks: {
+        ...asObject(existingEntry.hooks),
+        allowConversationAccess: true,
+      },
       config: {
         ...asObject(existingEntry.config),
         ...config,

@@ -17,6 +17,7 @@ on:
     paths:
       - ".github/workflows/e2e.yml"
       - "index.ts"
+      - "openclaw.plugin.json"
       - "src/**"
       - ".scripts/**"
       - "package.json"
@@ -28,6 +29,7 @@ on:
     paths:
       - ".github/workflows/e2e.yml"
       - "index.ts"
+      - "openclaw.plugin.json"
       - "src/**"
       - ".scripts/**"
       - "package.json"
@@ -165,6 +167,9 @@ jobs:
               "entries": {
                 "opik-openclaw": {
                   "enabled": true,
+                  "hooks": {
+                    "allowConversationAccess": true
+                  },
                   "config": {
                     "enabled": true,
                     "apiUrl": "http://127.0.0.1:18791",

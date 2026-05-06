@@ -49,14 +49,18 @@ const diagnosticListeners = vi.hoisted(() => {
   const listeners: Array<(evt: unknown) => void> = [];
   return listeners;
 });
+const diagnosticSubscriptionMode = vi.hoisted(() => ({
+  value: "function" as "function" | "object",
+}));
 
 vi.mock("openclaw/plugin-sdk", () => ({
   onDiagnosticEvent: (listener: (evt: unknown) => void) => {
     diagnosticListeners.push(listener);
-    return () => {
+    const unsubscribe = () => {
       const idx = diagnosticListeners.indexOf(listener);
       if (idx >= 0) diagnosticListeners.splice(idx, 1);
     };
+    return diagnosticSubscriptionMode.value === "object" ? { unsubscribe } : unsubscribe;
   },
 }));
 
@@ -145,6 +149,7 @@ describe("opik service", () => {
     vi.clearAllMocks();
     opikState.resetCounter();
     diagnosticListeners.length = 0;
+    diagnosticSubscriptionMode.value = "function";
     mockTraceFn.mockImplementation((_opts?: unknown) => opikState.createMockTrace());
     mockRetrieveProject.mockReset();
     mockRetrieveProject.mockResolvedValue(undefined);
@@ -2703,6 +2708,19 @@ describe("opik service", () => {
     });
 
     test("unsubscribes diagnostic listener", async () => {
+      const { api } = createApi();
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      expect(diagnosticListeners).toHaveLength(1);
+
+      await service.stop?.({} as any);
+
+      expect(diagnosticListeners).toHaveLength(0);
+    });
+
+    test("accepts object diagnostic subscriptions", async () => {
+      diagnosticSubscriptionMode.value = "object";
       const { api } = createApi();
       const service = createOpikService(api as any);
       await service.start(createServiceContext() as any);

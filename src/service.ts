@@ -85,6 +85,27 @@ const exporterMetrics = {
   flushRetries: 0,
 };
 
+function unsubscribeDiagnosticListener(subscription: unknown): void {
+  if (typeof subscription === "function") {
+    subscription();
+    return;
+  }
+
+  if (!subscription || typeof subscription !== "object" || Array.isArray(subscription)) {
+    return;
+  }
+
+  const candidates = subscription as {
+    unsubscribe?: unknown;
+    dispose?: unknown;
+    off?: unknown;
+  };
+  const unsubscribe = candidates.unsubscribe ?? candidates.dispose ?? candidates.off;
+  if (typeof unsubscribe === "function") {
+    unsubscribe.call(subscription);
+  }
+}
+
 function resetSharedRuntimeState(): void {
   cleanup?.();
   client = null;
@@ -682,7 +703,7 @@ export function createOpikService(
       // =====================================================================
       // Diagnostic event: model.usage — Accumulate cost/context info
       // =====================================================================
-      const unsubscribeDiagnostics = onDiagnosticEvent((evt: DiagnosticEventPayload) => {
+      const diagnosticsSubscription = onDiagnosticEvent((evt: DiagnosticEventPayload) => {
         if (evt.type !== "model.usage") return;
 
         const sessionKey = evt.sessionKey;
@@ -755,7 +776,7 @@ export function createOpikService(
       // Wire cleanup
       // =====================================================================
       cleanup = () => {
-        unsubscribeDiagnostics();
+        unsubscribeDiagnosticListener(diagnosticsSubscription);
         if (sweepInterval) {
           clearInterval(sweepInterval);
         }
