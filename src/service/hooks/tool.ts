@@ -30,6 +30,10 @@ type ToolHooksDeps = {
   formatError: (err: unknown) => string;
 };
 
+function completedToolCallKey(runId: string | undefined, toolCallId: string): string {
+  return runId ? `run:${runId}:toolcall:${toolCallId}` : `toolcall:${toolCallId}`;
+}
+
 export function registerToolHooks(deps: ToolHooksDeps): void {
   deps.api.on("before_tool_call", (event, toolCtx) => {
     if (!deps.getClient()) return;
@@ -157,8 +161,6 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
         }
       }
     }
-    if (!matchedKey || !matchedSpan) return;
-
     const spanUpdate: Record<string, unknown> = {};
     if (event.params && typeof event.params === "object" && !Array.isArray(event.params)) {
       spanUpdate.input = sanitizeValueForOpik(event.params) as Record<string, unknown>;
@@ -190,6 +192,31 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
       spanUpdate.output = sanitizeValueForOpik(output) as Record<string, unknown>;
     }
 
+    if (!matchedKey || !matchedSpan) {
+      if (!toolCallId) return;
+      const completedKey = completedToolCallKey(runId, toolCallId);
+      if (active.completedToolCallIds.has(completedKey)) return;
+
+      const toolParent =
+        container.sessionKey === sessionKey && active.llmSpan ? active.llmSpan : container.parent;
+      const spanCreate: Record<string, unknown> = {
+        name: event.toolName,
+        type: "tool",
+        ...(spanUpdate.input ? { input: spanUpdate.input } : {}),
+        ...(spanUpdate.metadata ? { metadata: spanUpdate.metadata } : {}),
+      };
+      try {
+        matchedSpan = toolParent.span(spanCreate as any);
+      } catch (err) {
+        deps.warn(
+          `opik: after-only tool span creation failed (sessionKey=${sessionKey}, tool=${event.toolName}): ${deps.formatError(err)}`,
+        );
+        return;
+      }
+      matchedKey = `after-only:${sessionKey}:${completedKey}`;
+      active.completedToolCallIds.add(completedKey);
+    }
+
     if (Object.keys(spanUpdate).length > 0) {
       deps.safeSpanUpdate(
         matchedSpan,
@@ -210,6 +237,9 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
       matchedSpan,
       `after_tool_call sessionKey=${sessionKey} tool=${event.toolName} key=${matchedKey}`,
     );
+    if (toolCallId) {
+      active.completedToolCallIds.add(completedToolCallKey(runId, toolCallId));
+    }
     active.toolSpans.delete(matchedKey);
   });
 }

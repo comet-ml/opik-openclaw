@@ -127,6 +127,7 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
         llmSpan,
         toolSpans: new Map(),
         subagentSpans: new Map(),
+        completedToolCallIds: new Set(),
         startedAt: now,
         lastActivityAt: now,
         costMeta: {},
