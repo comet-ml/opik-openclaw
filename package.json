@@ -32,6 +32,11 @@
   "peerDependencies": {
     "openclaw": ">=2026.3.2"
   },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^25.3.3",
     "commander": "^14.0.3",
