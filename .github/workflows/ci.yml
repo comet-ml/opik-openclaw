@@ -57,6 +57,7 @@ jobs:
       id-token: write
     uses: ./.github/workflows/clawhub-package-publish.yml
     with:
+      source: "."
       dry_run: true
       owner: opik
 

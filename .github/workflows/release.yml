@@ -21,6 +21,7 @@ jobs:
       package_name: ${{ steps.verify.outputs.package_name }}
       package_version: ${{ steps.verify.outputs.package_version }}
       tag_name: ${{ steps.verify.outputs.tag_name }}
+      source_commit: ${{ steps.verify.outputs.source_commit }}
       npm_already_published: ${{ steps.npm_exists.outputs.already_published }}
       clawhub_already_published: ${{ steps.clawhub_exists.outputs.already_published }}
       tarball_name: ${{ steps.pack.outputs.tarball_name }}
@@ -48,6 +49,7 @@ jobs:
         run: |
           PACKAGE_NAME="$(node -p "require('./package.json').name")"
           PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
 
           if [ -z "$TAG_NAME" ]; then
             echo "tag input is required for workflow_dispatch, and release.tag_name is required for release runs."
@@ -67,6 +69,7 @@ jobs:
           echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
 
       - name: Check if this version is already published to npm
         id: npm_exists
@@ -204,10 +207,13 @@ jobs:
       id-token: write
     uses: ./.github/workflows/clawhub-package-publish.yml
     with:
+      source: "."
       dry_run: false
       owner: opik
       ref: ${{ needs.validate.outputs.tag_name }}
       version: ${{ needs.validate.outputs.package_version }}
+      source_repo: ${{ github.repository }}
+      source_commit: ${{ needs.validate.outputs.source_commit }}
       source_ref: refs/tags/${{ needs.validate.outputs.tag_name }}
     secrets:
       clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}

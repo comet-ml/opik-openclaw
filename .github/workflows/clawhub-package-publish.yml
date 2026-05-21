@@ -86,7 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
 
       # ClawHub's package publish packs whatever exists on disk; it does not
       # honor npm's prepack hook. Build the package here so runtime entries
