@@ -116,7 +116,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: openclaw/clawhub
-          ref: 4787be4eb1e06b4ffb947456a6559835a4307f7b
+          ref: b07196f336ae401e148dbab9cdca3d9286eef689
           path: clawhub-source
 
       - name: Install ClawHub CLI dependencies
