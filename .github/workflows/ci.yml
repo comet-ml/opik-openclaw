@@ -60,6 +60,7 @@ jobs:
       source: "."
       dry_run: true
       owner: opik
+      family: code-plugin
 
   clawhub-suspicious-check:
     name: ClawHub suspicious scan

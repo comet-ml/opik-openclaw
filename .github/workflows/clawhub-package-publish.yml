@@ -36,6 +36,10 @@ on:
         description: Optional owner handle override for org/shared publishing.
         required: false
         type: string
+      family:
+        description: Optional package family override, for example code-plugin or bundle-plugin.
+        required: false
+        type: string
       version:
         description: Optional package version override.
         required: false
@@ -112,15 +116,17 @@ jobs:
         with:
           bun-version: 1.3.10
 
-      # Keep the ClawHub CLI source pinned so workflow behavior stays reproducible.
-      - uses: actions/checkout@v6
-        with:
-          repository: openclaw/clawhub
-          ref: b07196f336ae401e148dbab9cdca3d9286eef689
-          path: clawhub-source
+      - name: Checkout ClawHub CLI source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/clawhub-source"
+          git -C "$RUNNER_TEMP/clawhub-source" remote add origin https://github.com/openclaw/clawhub.git
+          git -C "$RUNNER_TEMP/clawhub-source" fetch --depth=1 origin b07196f336ae401e148dbab9cdca3d9286eef689
+          git -C "$RUNNER_TEMP/clawhub-source" checkout --detach FETCH_HEAD
 
       - name: Install ClawHub CLI dependencies
-        working-directory: clawhub-source
+        working-directory: ${{ runner.temp }}/clawhub-source
         run: bun install --frozen-lockfile
 
       - name: Validate publish mode inputs
@@ -183,6 +189,7 @@ jobs:
           INPUT_REF: ${{ inputs.ref }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
           INPUT_OWNER: ${{ inputs.owner }}
+          INPUT_FAMILY: ${{ inputs.family }}
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_TAGS: ${{ inputs.tags }}
           INPUT_SOURCE_REPO: ${{ inputs.source_repo }}
@@ -213,7 +220,7 @@ jobs:
               source = f"{source}@{ref}"
 
           cli_entry = (
-              Path(os.environ["GITHUB_WORKSPACE"])
+              Path(os.environ["RUNNER_TEMP"])
               / "clawhub-source"
               / "packages"
               / "clawhub"
@@ -240,10 +247,13 @@ jobs:
           cmd.append("--json")
 
           owner = os.environ["INPUT_OWNER"].strip()
+          family = os.environ["INPUT_FAMILY"].strip()
           version = os.environ["INPUT_VERSION"].strip()
           tags = os.environ["INPUT_TAGS"].strip()
           if owner:
               cmd += ["--owner", owner]
+          if family:
+              cmd += ["--family", family]
           if version:
               cmd += ["--version", version]
           if tags:

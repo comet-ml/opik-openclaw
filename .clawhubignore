@@ -2,3 +2,5 @@
 # installable ClawHub plugin archive.
 .github/
 .scripts/
+clawhub-source/
+*.tgz

@@ -85,6 +85,7 @@ jobs:
         env:
           PACKAGE_NAME: ${{ steps.verify.outputs.package_name }}
           PACKAGE_VERSION: ${{ steps.verify.outputs.package_version }}
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
         run: |
           python3 - <<'PY'
           import json
@@ -95,11 +96,15 @@ jobs:
 
           package_name = os.environ["PACKAGE_NAME"].strip()
           package_version = os.environ["PACKAGE_VERSION"].strip()
+          token = os.environ.get("CLAWHUB_TOKEN", "").strip()
           url = f"https://clawhub.ai/api/v1/packages/{urllib.parse.quote(package_name, safe='')}"
 
           already_published = False
+          request = urllib.request.Request(url)
+          if token:
+              request.add_header("Authorization", f"Bearer {token}")
           try:
-              with urllib.request.urlopen(url) as response:
+              with urllib.request.urlopen(request) as response:
                   payload = json.load(response)
           except urllib.error.HTTPError as error:
               if error.code != 404:
@@ -210,6 +215,7 @@ jobs:
       source: "."
       dry_run: false
       owner: opik
+      family: code-plugin
       ref: ${{ needs.validate.outputs.tag_name }}
       version: ${{ needs.validate.outputs.package_version }}
       source_repo: ${{ github.repository }}
