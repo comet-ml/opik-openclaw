@@ -58,6 +58,7 @@
     "src/service/payload-sanitizer.ts",
     "src/service/media.ts",
     "src/service/attachment-uploader.ts",
+    "src/service/hooks/codex.ts",
     "src/service/hooks/llm.ts",
     "src/service/hooks/tool.ts",
     "src/service/hooks/subagent.ts",

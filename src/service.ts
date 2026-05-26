@@ -6,6 +6,7 @@ import type {
 import { onDiagnosticEvent } from "openclaw/plugin-sdk";
 import type { Opik, Span, Trace } from "opik";
 import { createAttachmentUploader } from "./service/attachment-uploader.js";
+import { registerCodexHooks } from "./service/hooks/codex.js";
 import { registerLlmHooks } from "./service/hooks/llm.js";
 import { registerSubagentHooks } from "./service/hooks/subagent.js";
 import { registerToolHooks } from "./service/hooks/tool.js";
@@ -555,6 +556,21 @@ export function createOpikService(
       forgetSubagentSpanHost,
       safeSpanUpdate,
       safeSpanEnd,
+      warn: (message) => log.warn(message),
+      formatError,
+    });
+
+    registerCodexHooks({
+      api,
+      getClient: () => client,
+      activeTraces,
+      sessionByAgentId,
+      getLastActiveSessionKey: () => lastActiveSessionKey,
+      rememberSessionCorrelation,
+      resolveSessionSpanContainer,
+      safeSpanEnd,
+      scheduleMediaAttachmentUploads: attachmentUploader.scheduleMediaAttachmentUploads,
+      getProjectName: () => currentProjectName,
       warn: (message) => log.warn(message),
       formatError,
     });

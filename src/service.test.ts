@@ -2772,4 +2772,187 @@ describe("opik service", () => {
       await expect(service.stop?.({} as any)).resolves.toBeUndefined();
     });
   });
+
+  // =========================================================================
+  // Codex app-server tool_result hook (OPIK-6509)
+  // =========================================================================
+  describe("codex tool_result hook", () => {
+    function createApiWithCodexFactory() {
+      const hooks: Record<string, Function> = {};
+      const codexHandlers: Record<string, Function> = {};
+      const registerCodexAppServerExtensionFactory = vi.fn(async (factory: Function) => {
+        await factory({
+          on: (event: string, handler: Function) => {
+            codexHandlers[event] = handler;
+          },
+        });
+      });
+      const api = {
+        on: vi.fn((hookName: string, handler: Function) => {
+          hooks[hookName] = handler;
+        }),
+        registerService: vi.fn(),
+        registerCodexAppServerExtensionFactory,
+      };
+      return { api, hooks, codexHandlers, registerCodexAppServerExtensionFactory };
+    }
+
+    test("does not throw when host lacks registerCodexAppServerExtensionFactory", async () => {
+      const { api } = createApi();
+      const service = createOpikService(api as any);
+      await expect(service.start(createServiceContext() as any)).resolves.toBeUndefined();
+    });
+
+    test("registers a Codex extension factory at service start", async () => {
+      const { api, registerCodexAppServerExtensionFactory } = createApiWithCodexFactory();
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      expect(registerCodexAppServerExtensionFactory).toHaveBeenCalledTimes(1);
+    });
+
+    test("creates a Codex tool span under llm span and ends it on tool_result", async () => {
+      const { api, hooks, codexHandlers } = createApiWithCodexFactory();
+
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockToolSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+
+      const handler = codexHandlers.tool_result;
+      expect(handler).toBeDefined();
+      await handler(
+        {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          toolCallId: "call-1",
+          toolName: "shell",
+          args: { cmd: "ls" },
+          result: { stdout: "a\nb" },
+        },
+        { sessionKey: "s1", sessionId: "session-1", agentId: "agent-1", runId: "run-1" },
+      );
+
+      expect(mockLlmSpan.span).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "shell",
+          type: "tool",
+          input: { cmd: "ls" },
+          output: { stdout: "a\nb" },
+          metadata: expect.objectContaining({
+            source: "codex_app_server",
+            threadId: "thread-1",
+            turnId: "turn-1",
+            toolCallId: "call-1",
+            agentId: "agent-1",
+            sessionId: "session-1",
+            runId: "run-1",
+          }),
+        }),
+      );
+      expect(mockToolSpan.end).toHaveBeenCalled();
+    });
+
+    test("records error result with errorInfo and CodexToolError type", async () => {
+      const { api, hooks, codexHandlers } = createApiWithCodexFactory();
+
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockToolSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+
+      await codexHandlers.tool_result(
+        {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          toolCallId: "call-2",
+          toolName: "shell",
+          args: { cmd: "nope" },
+          result: { error: "command not found" },
+        },
+        { sessionKey: "s1" },
+      );
+
+      expect(mockLlmSpan.span).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "shell",
+          output: { error: "command not found" },
+          errorInfo: expect.objectContaining({
+            exceptionType: "CodexToolError",
+            message: "command not found",
+          }),
+        }),
+      );
+      expect(mockToolSpan.end).toHaveBeenCalled();
+    });
+
+    test("falls back to single active session when ctx.sessionKey is missing", async () => {
+      const { api, hooks, codexHandlers } = createApiWithCodexFactory();
+
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockToolSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+
+      await codexHandlers.tool_result(
+        {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          toolCallId: "call-3",
+          toolName: "shell",
+          args: {},
+          result: { ok: true },
+        },
+        {},
+      );
+
+      expect(mockLlmSpan.span).toHaveBeenCalled();
+      expect(mockToolSpan.end).toHaveBeenCalled();
+    });
+
+    test("drops the event when no active trace exists for the session", async () => {
+      const { api, codexHandlers } = createApiWithCodexFactory();
+
+      const mockTrace = opikState.createMockTrace();
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      await codexHandlers.tool_result(
+        {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          toolCallId: "call-4",
+          toolName: "shell",
+          args: {},
+          result: { ok: true },
+        },
+        { sessionKey: "unknown-session" },
+      );
+
+      expect(mockTrace.span).not.toHaveBeenCalled();
+    });
+  });
 });
