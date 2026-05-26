@@ -73,16 +73,18 @@ function handleCodexToolResult(
     ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
   };
 
+  const spanPayload: Record<string, unknown> = {
+    name: event.toolName,
+    type: "tool",
+    input: sanitizeValueForOpik(event.args),
+    ...(output !== undefined ? { output } : {}),
+    ...(errorInfo ? { errorInfo } : {}),
+    metadata,
+  };
+
   let toolSpan: Span;
   try {
-    toolSpan = parent.span({
-      name: event.toolName,
-      type: "tool",
-      input: sanitizeValueForOpik(event.args) as any,
-      ...(output !== undefined ? { output: output as any } : {}),
-      ...(errorInfo ? { errorInfo } : {}),
-      metadata,
-    });
+    toolSpan = parent.span(spanPayload as any);
   } catch (err) {
     deps.warn(
       `opik: codex tool span creation failed (sessionKey=${sessionKey}, tool=${event.toolName}): ${deps.formatError(err)}`,
@@ -127,9 +129,15 @@ function resolveSessionKey(
   return undefined;
 }
 
+type CodexErrorInfo = {
+  exceptionType: string;
+  message: string;
+  traceback: string;
+};
+
 function extractResult(
   result: unknown,
-): { output?: Record<string, unknown>; errorInfo?: Record<string, unknown> } {
+): { output?: Record<string, unknown>; errorInfo?: CodexErrorInfo } {
   if (result === undefined || result === null) {
     return {};
   }
