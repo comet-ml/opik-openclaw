@@ -15,10 +15,15 @@
 import { createCodexAppServerToolResultExtensionRunner } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { createOpikService } from "../dist/src/service.js";
 
-const opikApiUrl = process.env.PROBE_OPIK_API_URL ?? "http://127.0.0.1:18791";
-const opikApiKey = process.env.PROBE_OPIK_API_KEY ?? "mock-key";
-const projectName = process.env.PROBE_OPIK_PROJECT ?? "e2e-test";
 const probeMarker = process.env.PROBE_TOOL_NAME ?? "codex-probe-shell";
+
+const probeConfig = {
+  enabled: true,
+  apiKey: process.env.PROBE_OPIK_API_KEY ?? "mock-key",
+  apiUrl: process.env.PROBE_OPIK_API_URL ?? "http://127.0.0.1:18791",
+  projectName: process.env.PROBE_OPIK_PROJECT ?? "e2e-test",
+  workspaceName: "default",
+};
 
 const capturedFactories = [];
 const hooks = {};
@@ -38,31 +43,13 @@ const api = {
       writeConfigFile: async () => undefined,
     },
   },
-  pluginConfig: {
-    enabled: true,
-    apiKey: opikApiKey,
-    apiUrl: opikApiUrl,
-    projectName,
-    workspaceName: "default",
-  },
+  pluginConfig: { ...probeConfig },
 };
 
-const service = createOpikService(api, {
-  enabled: true,
-  apiKey: opikApiKey,
-  apiUrl: opikApiUrl,
-  projectName,
-  workspaceName: "default",
-});
+const service = createOpikService(api, { ...probeConfig });
 
 await service.start({
-  config: {
-    enabled: true,
-    apiKey: opikApiKey,
-    apiUrl: opikApiUrl,
-    projectName,
-    workspaceName: "default",
-  },
+  config: { ...probeConfig },
   logger: {
     info: (message) => console.error(`[probe-info] ${message}`),
     warn: (message) => console.error(`[probe-warn] ${message}`),

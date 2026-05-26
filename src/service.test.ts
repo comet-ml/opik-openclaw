@@ -2931,6 +2931,43 @@ describe("opik service", () => {
       expect(mockToolSpan.end).toHaveBeenCalled();
     });
 
+    test("resolves session via ctx.sessionId when sessionKey is missing", async () => {
+      const { api, hooks, codexHandlers } = createApiWithCodexFactory();
+
+      const mockTraceA = opikState.createMockTrace();
+      const mockTraceB = opikState.createMockTrace();
+      const mockLlmSpanB = opikState.createMockSpan();
+      const mockToolSpan = opikState.createMockSpan();
+      mockTraceB.span.mockReturnValueOnce(mockLlmSpanB);
+      mockLlmSpanB.span.mockReturnValueOnce(mockToolSpan);
+      mockTraceFn
+        .mockReturnValueOnce(mockTraceA)
+        .mockReturnValueOnce(mockTraceB);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("session-a"));
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("session-b"));
+
+      await codexHandlers.tool_result(
+        {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          toolCallId: "call-sid",
+          toolName: "shell",
+          args: { cmd: "ls" },
+          result: { stdout: "ok" },
+        },
+        { sessionId: "session-b" },
+      );
+
+      expect(mockLlmSpanB.span).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "shell", type: "tool" }),
+      );
+      expect(mockToolSpan.end).toHaveBeenCalled();
+    });
+
     test("drops the event when no active trace exists for the session", async () => {
       const { api, codexHandlers } = createApiWithCodexFactory();
 

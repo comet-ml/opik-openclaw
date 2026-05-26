@@ -113,6 +113,9 @@ function resolveSessionKey(
   if (ctx.sessionKey && deps.activeTraces.has(ctx.sessionKey)) {
     return ctx.sessionKey;
   }
+  if (ctx.sessionId && deps.activeTraces.has(ctx.sessionId)) {
+    return ctx.sessionId;
+  }
   if (ctx.agentId) {
     const byAgentId = deps.sessionByAgentId.get(ctx.agentId);
     if (byAgentId && deps.activeTraces.has(byAgentId)) {
