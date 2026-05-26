@@ -108,6 +108,35 @@ if (EXPECTED_OPIK_PROJECT) {
   }
 }
 
+const PROBE_TOOL_NAME = process.env.PROBE_TOOL_NAME ?? "codex-probe-shell";
+const PROBE_EXPECTED = process.env.PROBE_EXPECTED === "1";
+
+if (PROBE_EXPECTED) {
+  const probeSpan = findCodexProbeSpan(opikJournal, PROBE_TOOL_NAME);
+  if (!probeSpan) {
+    failures.push(
+      `Codex probe (OPIK-6509): expected a span with metadata.source="codex_app_server" and name="${PROBE_TOOL_NAME}" in the Opik journal — Codex extension factory may not have fired`,
+    );
+  } else {
+    console.log(
+      `[check-e2e] Codex probe: PASS — span name="${probeSpan.name}" toolCallId=${probeSpan.metadata?.toolCallId}`,
+    );
+  }
+}
+
+function findCodexProbeSpan(journal, toolName) {
+  if (!journal?.requests) return undefined;
+  for (const entry of journal.requests) {
+    if (entry.route !== "spans-batch") continue;
+    const spans = entry.body?.spans ?? [];
+    for (const span of spans) {
+      if (span?.name !== toolName) continue;
+      if (span?.metadata?.source === "codex_app_server") return span;
+    }
+  }
+  return undefined;
+}
+
 if (failures.length > 0) {
   console.error("[check-e2e] FAIL:");
   for (const f of failures) console.error("  •", f);

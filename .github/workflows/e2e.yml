@@ -239,6 +239,21 @@ jobs:
           fi
           sleep 2
 
+      - name: Symlink global openclaw into node_modules for probe
+        run: |
+          mkdir -p node_modules
+          ln -sf "$(npm root -g)/openclaw" "node_modules/openclaw"
+          node -e "console.error('[probe-prep] openclaw resolves at', require.resolve('openclaw/plugin-sdk/agent-harness-runtime'))"
+
+      - name: Run Codex-runtime probe (OPIK-6509)
+        run: node .scripts/codex-runtime-probe.mjs
+        env:
+          PROBE_OPIK_API_URL: "http://127.0.0.1:18791"
+          PROBE_OPIK_API_KEY: "mock-key"
+          PROBE_OPIK_PROJECT: "e2e-test"
+          PROBE_TOOL_NAME: "codex-probe-shell"
+        timeout-minutes: 1
+
       - name: Stop mock servers and collect results
         run: |
           if [ -f mock-opik.pid ]; then
@@ -251,6 +266,9 @@ jobs:
 
       - name: Assert E2E results
         run: node .scripts/check-e2e-result.mjs
+        env:
+          PROBE_EXPECTED: "1"
+          PROBE_TOOL_NAME: "codex-probe-shell"
 
       - name: Upload E2E result on failure
         if: failure()
