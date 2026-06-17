@@ -29,6 +29,13 @@ LIVE_MODEL="${OPENCLAW_LIVE_MODEL:-gpt-4o-mini}"
 GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-local-e2e-token}"
 
+# GATEWAY_PORT is interpolated unquoted into the config JSON below; a non-integer
+# would produce invalid JSON and fail the gateway with an opaque error, so reject it now.
+if ! [[ "${GATEWAY_PORT}" =~ ^[0-9]+$ ]]; then
+  err "OPENCLAW_GATEWAY_PORT must be an integer, got: ${GATEWAY_PORT}"
+  exit 1
+fi
+
 # npm needs a writable cache; the rootfs is read-only, so point it at tmpfs and
 # seed it from the image's warmed cache (which holds the pinned OpenClaw download).
 export npm_config_cache="${HOME}/.npm"
