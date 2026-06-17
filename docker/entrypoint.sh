@@ -61,9 +61,11 @@ TARBALL_PATH="${BUILD_DIR}/${TARBALL_NAME}"
 info "packed: ${TARBALL_NAME}"
 
 mkdir -p "${CONFIG_DIR}"
+export OPENCLAW_GATEWAY_TOKEN="${GATEWAY_TOKEN}"
 
-# Mirror the config shape used by .scripts/live-e2e.mjs so the plugin loads with
-# conversation hooks enabled and traces are routed to the engineer's project.
+# Write only the gateway + model defaults first. The plugin entry must NOT exist
+# yet: `openclaw plugins install` validates config and aborts if it references a
+# not-yet-installed plugin, and it injects plugins.entries.opik-openclaw itself.
 cat > "${CONFIG_PATH}" <<JSON
 {
   "gateway": {
@@ -76,31 +78,26 @@ cat > "${CONFIG_PATH}" <<JSON
     "defaults": {
       "model": { "primary": "openai/${LIVE_MODEL}" }
     }
-  },
-  "plugins": {
-    "allow": ["opik-openclaw"],
-    "entries": {
-      "opik-openclaw": {
-        "enabled": true,
-        "hooks": { "allowConversationAccess": true },
-        "config": {
-          "enabled": true,
-          "apiUrl": "${OPIK_URL_OVERRIDE}",
-          "apiKey": "${OPIK_API_KEY}",
-          "projectName": "${OPIK_PROJECT_NAME}",
-          "workspaceName": "${OPIK_WORKSPACE}",
-          "tags": ["local-docker-e2e"]
-        }
-      }
-    }
   }
 }
 JSON
 
-export OPENCLAW_GATEWAY_TOKEN="${GATEWAY_TOKEN}"
-
 info "installing plugin build into OpenClaw..."
 ${OPENCLAW} plugins install "${TARBALL_PATH}"
+
+# Merge Opik settings into the install-updated config via config set (dot-path,
+# JSON5 value) rather than overwriting the file — install expands many defaults we
+# must preserve. No "hooks" key: openclaw 2026.3.2 rejects it as unrecognized; the
+# plugin registers its own conversation hooks on load.
+info "configuring Opik export..."
+${OPENCLAW} config set plugins.entries.opik-openclaw.config \
+  "{enabled:true,apiUrl:\"${OPIK_URL_OVERRIDE}\",apiKey:\"${OPIK_API_KEY}\",projectName:\"${OPIK_PROJECT_NAME}\",workspaceName:\"${OPIK_WORKSPACE}\",tags:[\"local-docker-e2e\"]}"
+${OPENCLAW} config set plugins.allow '["opik-openclaw"]'
+
+if ! ${OPENCLAW} config validate; then
+  err "config invalid after applying Opik settings"
+  exit 1
+fi
 
 info "starting gateway on port ${GATEWAY_PORT}..."
 ${OPENCLAW} gateway run >"${GATEWAY_LOG}" 2>&1 &
@@ -115,7 +112,7 @@ cleanup() {
 trap cleanup EXIT
 
 ready=""
-for _ in $(seq 1 30); do
+for _ in $(seq 1 40); do
   if ${OPENCLAW} health >/dev/null 2>&1; then
     ready=1
     break
@@ -137,9 +134,12 @@ $(info "gateway ready — plugin installed and tracing to Opik")
   Workspace: ${OPIK_WORKSPACE}
   Endpoint:  ${OPIK_URL_OVERRIDE}
 
-Run a turn that triggers tool calls, e.g.:
+Run a turn that triggers tool calls. List configured agents first, then target one:
 
-  openclaw agent --agent main --message "Use the shell tool to run 'echo hello', then reply done."
+  openclaw agents list
+  openclaw agent --agent <id> --message "Use the shell tool to run 'echo hello', then reply done."
+
+(Or 'openclaw agent --local --message ...' to run the embedded agent without routing.)
 
 Then open your Opik project and confirm:
   - an LLM span and a tool span (e.g. shell / apply_patch) under the trace

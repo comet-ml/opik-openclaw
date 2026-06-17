@@ -264,11 +264,14 @@ The host runs only git: it checks out the PR/branch and exports a source snapsho
 with `git archive` (which executes no project code). The snapshot is mounted
 read-only into a clean Node 22 image that runs `openclaw@2026.3.2` (override with
 `OPENCLAW_VERSION`); the container does `npm ci && npm pack`, installs the build,
-starts the gateway, and drops you into a shell. Run a turn that triggers tool
-calls, e.g.:
+starts the gateway, and drops you into a shell. List the configured agents, then
+run a turn that triggers tool calls:
 
 ```bash
-openclaw agent --agent main --message "Use the shell tool to run 'echo hello', then reply done."
+openclaw agents list
+openclaw agent --agent <id> --message "Use the shell tool to run 'echo hello', then reply done."
+# or run the embedded agent without routing:
+openclaw agent --local --message "Use the shell tool to run 'echo hello', then reply done."
 ```
 
 Then open your Opik project and confirm the trace shows an LLM span and a tool span
