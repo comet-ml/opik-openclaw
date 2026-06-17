@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.github
+.claude
+.artifacts
+*.tgz
+.env
+.env.*
+screenshot.png
+diagrams

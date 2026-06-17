@@ -228,6 +228,75 @@ Notes:
 - falls back to `npx openclaw@${OPENCLAW_LIVE_OPENCLAW_VERSION:-latest}` when `openclaw` is not already on your `PATH`
 - override the live model with `OPENCLAW_LIVE_MODEL` if `gpt-4o-mini` is not what you want to exercise
 
+## Local Docker E2E testing
+
+When reviewing a PR or branch, you can install that build into OpenClaw inside an
+isolated, disposable Docker container and manually verify that LLM/tool spans land
+in your own Opik project — no host OpenClaw setup required and nothing persists on
+the host.
+
+Prerequisites:
+
+- Docker
+- Node.js `>=22.12.0` and npm `>=10` (used on the host to pack the plugin)
+- An Opik project plus an `OPENAI_API_KEY` for the live model call
+- Optional: the GitHub `gh` CLI (used to check out PRs, including forks)
+
+Set the required credentials in your shell or in a gitignored `.env` (copy from
+`.env.example`):
+
+```bash
+export OPIK_API_KEY="your-api-key"
+export OPIK_URL_OVERRIDE="https://www.comet.com/opik/api"
+export OPENAI_API_KEY="sk-..."
+# optional: OPIK_PROJECT_NAME (default openclaw), OPIK_WORKSPACE (default default)
+```
+
+Run a PR, a branch, or the current working tree:
+
+```bash
+./scripts/test-local.sh 114                 # check out PR #114 and test it
+./scripts/test-local.sh my-feature-branch   # test a branch
+./scripts/test-local.sh --current           # test the current working tree as-is
+```
+
+The host runs only git: it checks out the PR/branch and exports a source snapshot
+with `git archive` (which executes no project code). The snapshot is mounted
+read-only into a clean Node 22 image that runs `openclaw@2026.3.2` (override with
+`OPENCLAW_VERSION`); the container does `npm ci && npm pack`, installs the build,
+starts the gateway, and drops you into a shell. Run a turn that triggers tool
+calls, e.g.:
+
+```bash
+openclaw agent --agent main --message "Use the shell tool to run 'echo hello', then reply done."
+```
+
+Then open your Opik project and confirm the trace shows an LLM span and a tool span
+(e.g. `shell` / `apply_patch`), with `metadata.created_from = "openclaw"`. For
+Codex-native runs (PR #114) the spans also carry `metadata.source = "codex_app_server"`.
+Type `exit` to tear the container down.
+
+### Safety model
+
+This is meant for reviewing your own team's PRs; it hardens the obvious risks but
+is not a substitute for trusting the code you run.
+
+- **No host code execution.** The host runs only git (`checkout` + `git archive`).
+  `npm ci` / `npm pack` — and therefore any PR install scripts — run only inside the
+  container, never on your machine.
+- **No host config touched.** OpenClaw uses a throwaway container `HOME`; your real
+  `~/.openclaw` is never read or written.
+- **Hardened container.** Runs unprivileged with `--cap-drop ALL`,
+  `--security-opt no-new-privileges`, a `--read-only` root filesystem (writable
+  `tmpfs` only), and pid/memory caps. The source snapshot is mounted read-only.
+- **Disposable.** `--rm` deletes the container and its writable layer on exit.
+- **Secrets at runtime only.** Credentials come from the environment (or a gitignored
+  `.env`) via `docker run -e`; they are never baked into the image. Note they are
+  live inside the running container by design, so treat `OPIK_API_KEY` /
+  `OPENAI_API_KEY` as scoped, burnable keys rather than shared production secrets.
+- **Not a sandbox.** Plain Docker shares the host kernel and has open network egress
+  (needed to reach Opik/OpenAI). Do not use this to run PRs you do not trust.
+
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
