@@ -237,47 +237,74 @@ the host.
 
 Prerequisites:
 
-- Docker
+- Docker (with Compose)
 - Node.js `>=22.12.0` and npm `>=10` (used on the host to pack the plugin)
-- An Opik project plus an `OPENAI_API_KEY` for the live model call
+- An Opik project to send traces to (see "Opik targets" below)
 - Optional: the GitHub `gh` CLI (used to check out PRs, including forks)
 
-Set the required credentials in your shell or in a gitignored `.env` (copy from
-`.env.example`):
+### Model provider
+
+By default the turn is driven by a **local LLM running in an Ollama sidecar** — no
+model-provider account or API key required. This is enough to verify trace export
+and LLM/tool spans. The first run pulls the model (default `llama3.2:3b`) into a
+named volume and reuses it afterwards; local CPU inference is slow.
+
+To drive turns with a **real provider** instead (stronger tool-calling, or the Codex
+runtime that produces `codex_app_server` spans), pass `--provider openai` and supply
+your own `OPENAI_API_KEY`. The key is yours, injected at runtime only, never baked
+into the image.
+
+### Opik targets
+
+Point `OPIK_URL_OVERRIDE` at whichever Opik you want traces to land in:
+
+- **Comet Cloud:** `https://www.comet.com/opik/api` (set `OPIK_API_KEY`)
+- **Local self-hosted Opik on your host:** `http://host.docker.internal:5173/api`
+  (`OPIK_API_KEY` can be omitted for unauthenticated local deployments)
+
+Set config in your shell or in a gitignored `.env` (copy from `.env.example`):
 
 ```bash
-export OPIK_API_KEY="your-api-key"
 export OPIK_URL_OVERRIDE="https://www.comet.com/opik/api"
-export OPENAI_API_KEY="sk-..."
+export OPIK_API_KEY="your-api-key"        # optional for unauthenticated local Opik
 # optional: OPIK_PROJECT_NAME (default openclaw), OPIK_WORKSPACE (default default)
+# only for --provider openai:
+export OPENAI_API_KEY="sk-..."
 ```
 
 Run a PR, a branch, or the current working tree:
 
 ```bash
-./scripts/test-local.sh 114                 # check out PR #114 and test it
-./scripts/test-local.sh my-feature-branch   # test a branch
-./scripts/test-local.sh --current           # test the current working tree as-is
+./scripts/test-local.sh 114                      # PR #114, local Ollama (default)
+./scripts/test-local.sh my-feature-branch        # a branch
+./scripts/test-local.sh --current                # the current working tree as-is
+./scripts/test-local.sh 114 --provider openai    # drive with a real provider / Codex
 ```
 
 The host runs only git: it checks out the PR/branch and exports a source snapshot
 with `git archive` (which executes no project code). The snapshot is mounted
 read-only into a clean Node 22 image that runs the latest `openclaw` (pin a
-specific version with `OPENCLAW_VERSION`); the container does `npm ci && npm pack`, installs the build,
-starts the gateway, and drops you into a shell. List the configured agents, then
-run a turn that triggers tool calls:
+specific version with `OPENCLAW_VERSION`); the container does `npm ci && npm pack`,
+installs the build, configures the provider + Opik export, starts the gateway, and
+drops you into a shell. List the configured agents, then run a turn that triggers
+tool calls:
 
 ```bash
 openclaw agents list
-openclaw agent --agent <id> --message "Use the shell tool to run 'echo hello', then reply done."
-# or run the embedded agent without routing:
-openclaw agent --local --message "Use the shell tool to run 'echo hello', then reply done."
+openclaw agent --session-id test1 --message "Use the shell tool to run 'echo hello', then reply done."
 ```
 
 Then open your Opik project and confirm the trace shows an LLM span and a tool span
 (e.g. `shell` / `apply_patch`), with `metadata.created_from = "openclaw"`. For
-Codex-native runs (PR #114) the spans also carry `metadata.source = "codex_app_server"`.
-Type `exit` to tear the container down.
+Codex-native runs (PR #114, `--provider openai`) the spans also carry
+`metadata.source = "codex_app_server"`. Type `exit` to tear the container down.
+
+Notes:
+
+- Small local models call tools less reliably than hosted ones; if a turn answers in
+  text instead of calling the tool, retry or use `--provider openai`.
+- Override the local model with `OLLAMA_MODEL` (must be tool-capable, e.g.
+  `qwen2.5-coder:7b`).
 
 ### Safety model
 
@@ -294,11 +321,12 @@ is not a substitute for trusting the code you run.
   `tmpfs` only), and pid/memory caps. The source snapshot is mounted read-only.
 - **Disposable.** `--rm` deletes the container and its writable layer on exit.
 - **Secrets at runtime only.** Credentials come from the environment (or a gitignored
-  `.env`) via `docker run -e`; they are never baked into the image. Note they are
-  live inside the running container by design, so treat `OPIK_API_KEY` /
-  `OPENAI_API_KEY` as scoped, burnable keys rather than shared production secrets.
-- **Not a sandbox.** Plain Docker shares the host kernel and has open network egress
-  (needed to reach Opik/OpenAI). Do not use this to run PRs you do not trust.
+  `.env`); they are never baked into the image. Any key you pass (`OPIK_API_KEY`, or
+  `OPENAI_API_KEY` with `--provider openai`) is live inside the running container by
+  design, so treat it as scoped/burnable rather than a shared production secret. The
+  default Ollama provider needs no key at all.
+- **Not a sandbox.** Plain Docker shares the host kernel and has open network egress.
+  Do not use this to run PRs you do not trust.
 
 ## Contributing
 

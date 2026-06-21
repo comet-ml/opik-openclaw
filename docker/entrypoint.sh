@@ -20,14 +20,34 @@ if [[ ! -d "${SRC_DIR}" || ! -f "${SRC_DIR}/package.json" ]]; then
   exit 1
 fi
 
-: "${OPIK_API_KEY:?OPIK_API_KEY is required}"
 : "${OPIK_URL_OVERRIDE:?OPIK_URL_OVERRIDE is required (e.g. https://www.comet.com/opik/api)}"
-: "${OPENAI_API_KEY:?OPENAI_API_KEY is required for the live model call}"
+# Optional: unauthenticated local Opik deployments do not need a key.
+OPIK_API_KEY="${OPIK_API_KEY:-}"
 OPIK_PROJECT_NAME="${OPIK_PROJECT_NAME:-openclaw}"
 OPIK_WORKSPACE="${OPIK_WORKSPACE:-default}"
-LIVE_MODEL="${OPENCLAW_LIVE_MODEL:-gpt-4o-mini}"
 GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-local-e2e-token}"
+
+# Model provider. Default is a local Ollama sidecar (no account, no real key).
+# Set MODEL_PROVIDER=openai (and OPENAI_API_KEY) to drive turns with a real
+# provider instead — e.g. to exercise the Codex runtime or a stronger model.
+MODEL_PROVIDER="${MODEL_PROVIDER:-ollama}"
+if [[ "${MODEL_PROVIDER}" == "ollama" ]]; then
+  OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://ollama:11434}"
+  OLLAMA_MODEL="${OLLAMA_MODEL:-llama3.2:3b}"
+  # Declare the model's full context. OpenClaw blocks windows below 16000 AND sizes
+  # its prompt budget from this number, so it must be large enough to hold the agent
+  # system prompt — too small overflows regardless of model size.
+  OLLAMA_CONTEXT_WINDOW="${OLLAMA_CONTEXT_WINDOW:-131072}"
+  AGENT_MODEL="ollama/${OLLAMA_MODEL}"
+elif [[ "${MODEL_PROVIDER}" == "openai" ]]; then
+  : "${OPENAI_API_KEY:?OPENAI_API_KEY is required when MODEL_PROVIDER=openai}"
+  LIVE_MODEL="${OPENCLAW_LIVE_MODEL:-gpt-4o-mini}"
+  AGENT_MODEL="openai/${LIVE_MODEL}"
+else
+  err "unsupported MODEL_PROVIDER: ${MODEL_PROVIDER} (expected 'ollama' or 'openai')"
+  exit 1
+fi
 
 # GATEWAY_PORT is interpolated unquoted into the config JSON below; a non-integer
 # would produce invalid JSON and fail the gateway with an opaque error, so reject it now.
@@ -66,6 +86,39 @@ export OPENCLAW_GATEWAY_TOKEN="${GATEWAY_TOKEN}"
 # Write only the gateway + model defaults first. The plugin entry must NOT exist
 # yet: `openclaw plugins install` validates config and aborts if it references a
 # not-yet-installed plugin, and it injects plugins.entries.opik-openclaw itself.
+#
+# For Ollama, declare an explicit provider (baseUrl points at the sidecar; explicit
+# config disables auto-discovery, so a manual model entry is required). Use the
+# native Ollama API URL — no /v1 suffix, which would break tool calling.
+if [[ "${MODEL_PROVIDER}" == "ollama" ]]; then
+  PROVIDERS_BLOCK=$(cat <<JSON
+,
+  "models": {
+    "providers": {
+      "ollama": {
+        "apiKey": "ollama-local",
+        "baseUrl": "${OLLAMA_BASE_URL}",
+        "api": "ollama",
+        "models": [
+          {
+            "id": "${OLLAMA_MODEL}",
+            "name": "${OLLAMA_MODEL}",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": ${OLLAMA_CONTEXT_WINDOW},
+            "maxTokens": 2048
+          }
+        ]
+      }
+    }
+  }
+JSON
+)
+else
+  PROVIDERS_BLOCK=""
+fi
+
 cat > "${CONFIG_PATH}" <<JSON
 {
   "gateway": {
@@ -76,22 +129,31 @@ cat > "${CONFIG_PATH}" <<JSON
   },
   "agents": {
     "defaults": {
-      "model": { "primary": "openai/${LIVE_MODEL}" }
+      "model": { "primary": "${AGENT_MODEL}" }
     }
-  }
+  }${PROVIDERS_BLOCK}
 }
 JSON
 
 info "installing plugin build into OpenClaw..."
 ${OPENCLAW} plugins install "${TARBALL_PATH}"
 
-# Merge Opik settings into the install-updated config via config set (dot-path,
-# JSON5 value) rather than overwriting the file — install expands many defaults we
-# must preserve. No "hooks" key: openclaw 2026.3.2 rejects it as unrecognized; the
-# plugin registers its own conversation hooks on load.
+# Merge Opik settings into the install-updated config via config set, one field at a
+# time. Setting each scalar with its own dot-path passes the value as a raw string, so
+# quotes/backslashes in OPIK_* env vars are stored verbatim — a hand-built JSON5 blob
+# would break parsing or corrupt the value. install expands many defaults we preserve.
+# No "hooks" key: openclaw 2026.3.2 rejects it as unrecognized; the plugin registers
+# its own conversation hooks on load. tags is a fixed literal (no user input).
 info "configuring Opik export..."
-${OPENCLAW} config set plugins.entries.opik-openclaw.config \
-  "{enabled:true,apiUrl:\"${OPIK_URL_OVERRIDE}\",apiKey:\"${OPIK_API_KEY}\",projectName:\"${OPIK_PROJECT_NAME}\",workspaceName:\"${OPIK_WORKSPACE}\",tags:[\"local-docker-e2e\"]}"
+PLUGIN_CFG="plugins.entries.opik-openclaw.config"
+${OPENCLAW} config set "${PLUGIN_CFG}.enabled" true
+${OPENCLAW} config set "${PLUGIN_CFG}.apiUrl" "${OPIK_URL_OVERRIDE}"
+if [[ -n "${OPIK_API_KEY}" ]]; then
+  ${OPENCLAW} config set "${PLUGIN_CFG}.apiKey" "${OPIK_API_KEY}"
+fi
+${OPENCLAW} config set "${PLUGIN_CFG}.projectName" "${OPIK_PROJECT_NAME}"
+${OPENCLAW} config set "${PLUGIN_CFG}.workspaceName" "${OPIK_WORKSPACE}"
+${OPENCLAW} config set "${PLUGIN_CFG}.tags" '["local-docker-e2e"]'
 ${OPENCLAW} config set plugins.allow '["opik-openclaw"]'
 
 if ! ${OPENCLAW} config validate; then
@@ -130,6 +192,8 @@ cat <<GUIDE
 
 $(info "gateway ready — plugin installed and tracing to Opik")
 
+  Provider:  ${MODEL_PROVIDER}
+  Model:     ${AGENT_MODEL}
   Project:   ${OPIK_PROJECT_NAME}
   Workspace: ${OPIK_WORKSPACE}
   Endpoint:  ${OPIK_URL_OVERRIDE}

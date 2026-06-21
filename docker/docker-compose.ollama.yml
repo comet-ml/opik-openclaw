@@ -1,0 +1,67 @@
+# Ollama-backed local E2E: a local LLM sidecar so a real OpenClaw turn can be driven
+# with no model-provider account or API key. test-local.sh sets the env vars below.
+#
+#   SRC_DIR    host path to the git-archive source snapshot (mounted read-only)
+#   OUT_DIR    host path for run artifacts / span results
+#   OLLAMA_MODEL  tool-capable model to pull and run (default llama3.2:3b)
+#
+# The tester keeps the same hardening as the plain `docker run` path; the ollama
+# service holds the model in a named volume so it is pulled once and reused.
+services:
+  ollama:
+    image: ollama/ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - e2e
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  tester:
+    image: opik-openclaw-e2e:local
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      MODEL_PROVIDER: ollama
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3.2:3b}"
+      OPIK_API_KEY: "${OPIK_API_KEY}"
+      OPIK_URL_OVERRIDE: "${OPIK_URL_OVERRIDE}"
+      OPIK_PROJECT_NAME: "${OPIK_PROJECT_NAME:-openclaw}"
+      OPIK_WORKSPACE: "${OPIK_WORKSPACE:-default}"
+    volumes:
+      - "${SRC_DIR}:/src:ro"
+      - "${OUT_DIR}:/out"
+    networks:
+      - e2e
+    # Lets OPIK_URL_OVERRIDE point at a host-run local Opik via host.docker.internal.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    stdin_open: true
+    tty: true
+    # Hardening (mirrors scripts/test-local.sh): unprivileged, no new privileges,
+    # read-only rootfs with writable tmpfs only, bounded blast radius.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
+    read_only: true
+    pids_limit: 512
+    mem_limit: 4g
+    tmpfs:
+      - /work:exec,size=2g,uid=1000,gid=1000
+      - /home/node:exec,size=3g,uid=1000,gid=1000
+      - /tmp:size=512m,uid=1000,gid=1000
+
+networks:
+  e2e:
+    driver: bridge
+
+volumes:
+  ollama-models:

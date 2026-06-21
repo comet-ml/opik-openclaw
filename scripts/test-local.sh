@@ -4,12 +4,20 @@
 # verification.
 #
 # Usage:
-#   ./scripts/test-local.sh <PR# | branch | --current>
+#   ./scripts/test-local.sh <PR# | branch | --current> [--provider ollama|openai]
 #
 # Examples:
-#   ./scripts/test-local.sh 114                 # check out PR #114 and test it
+#   ./scripts/test-local.sh 114                 # check out PR #114, test it with local Ollama (default)
 #   ./scripts/test-local.sh my-feature-branch   # test a branch
 #   ./scripts/test-local.sh --current           # test the current working tree as-is
+#   ./scripts/test-local.sh 114 --provider openai   # drive turns with a real provider (OpenAI/Codex)
+#
+# Model provider:
+#   - ollama (default): runs a local LLM in a sidecar container — no model-provider
+#     account or API key. Good for verifying trace export + LLM/tool spans.
+#   - openai: drives turns with a real provider via your OPENAI_API_KEY. Needed for
+#     stronger tool-calling or the Codex runtime (codex_app_server spans). The key is
+#     yours, injected at runtime only, never baked into the image.
 #
 # Safety model:
 #   - The host runs only git (checkout + `git archive`); it never runs npm, so PR
@@ -18,14 +26,18 @@
 #   - The container runs unprivileged with all Linux capabilities dropped, a
 #     read-only root filesystem (writable tmpfs only), no-new-privileges, and pid /
 #     memory caps. It is --rm, so nothing persists on exit.
-#   - Opik credentials are read from the environment (or a gitignored .env) and
-#     passed at runtime only; they are never baked into the image.
+#   - Credentials are read from the environment (or a gitignored .env) and passed at
+#     runtime only; they are never baked into the image.
 #
 # Required env (set directly or via .env):
-#   OPIK_API_KEY, OPIK_URL_OVERRIDE, OPENAI_API_KEY
+#   OPIK_URL_OVERRIDE                        (always)
+#   OPENAI_API_KEY                           (only when --provider openai)
+# Optional env:
+#   OPIK_API_KEY                             (omit for unauthenticated local Opik)
 # Optional env:
 #   OPIK_PROJECT_NAME (default: openclaw), OPIK_WORKSPACE (default: default),
-#   OPENCLAW_LIVE_MODEL (default: gpt-4o-mini), OPENCLAW_VERSION (default: latest)
+#   OLLAMA_MODEL (default: llama3.2:3b), OPENCLAW_LIVE_MODEL (default: gpt-4o-mini),
+#   OPENCLAW_VERSION (default: latest)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,10 +56,42 @@ usage() {
   awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "${BASH_SOURCE[0]}"
 }
 
-TARGET="${1:-}"
-if [[ -z "${TARGET}" || "${TARGET}" == "-h" || "${TARGET}" == "--help" ]]; then
+TARGET=""
+PROVIDER="ollama"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --provider)
+      PROVIDER="${2:-}"
+      shift 2
+      ;;
+    --provider=*)
+      PROVIDER="${1#*=}"
+      shift
+      ;;
+    *)
+      if [[ -z "${TARGET}" ]]; then
+        TARGET="$1"
+        shift
+      else
+        err "unexpected argument: $1"
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+if [[ -z "${TARGET}" ]]; then
   usage
-  [[ -z "${TARGET}" ]] && exit 1 || exit 0
+  exit 1
+fi
+
+if [[ "${PROVIDER}" != "ollama" && "${PROVIDER}" != "openai" ]]; then
+  err "unsupported --provider: ${PROVIDER} (expected 'ollama' or 'openai')"
+  exit 1
 fi
 
 # Load .env if present so credentials can live in a gitignored file.
@@ -59,13 +103,19 @@ if [[ -f "${REPO_ROOT}/.env" ]]; then
   set +a
 fi
 
-for var in OPIK_API_KEY OPIK_URL_OVERRIDE OPENAI_API_KEY; do
+# OPIK_API_KEY is optional: unauthenticated local Opik deployments do not need one.
+REQUIRED_ENV=(OPIK_URL_OVERRIDE)
+[[ "${PROVIDER}" == "openai" ]] && REQUIRED_ENV+=(OPENAI_API_KEY)
+for var in "${REQUIRED_ENV[@]}"; do
   if [[ -z "${!var:-}" ]]; then
     err "missing required env var: ${var}"
     err "set it in your shell or in ${REPO_ROOT}/.env (see .env.example)"
     exit 1
   fi
 done
+
+# Default the optional key so it can be referenced safely under `set -u`.
+OPIK_API_KEY="${OPIK_API_KEY:-}"
 
 command -v docker >/dev/null 2>&1 || { err "docker is not installed or not on PATH"; exit 1; }
 
@@ -108,7 +158,7 @@ info "testing ref: $(git rev-parse --short "${REF}") ($(git rev-parse --abbrev-r
 
 # --- Snapshot the source with git archive (pure git, runs no project code) ------
 SRC_DIR="$(mktemp -d)"
-trap 'rm -rf "${SRC_DIR}"' EXIT
+trap 'rm -rf "${SRC_DIR}"' EXIT  # replaced by a provider-specific trap before the container runs
 info "exporting source snapshot via git archive..."
 git archive --format=tar "${REF}" | tar -x -C "${SRC_DIR}"
 
@@ -120,30 +170,53 @@ docker build \
   -f docker/Dockerfile \
   .
 
-# --- Run the hardened, disposable container -------------------------------------
-# Security flags:
-#   --rm                       container and its writable layer are deleted on exit
-#   --cap-drop ALL             drop all Linux capabilities
-#   --security-opt no-new-privileges  block setuid privilege escalation
-#   --read-only                root filesystem is immutable...
-#   --tmpfs ...                ...with writable tmpfs only where the build/runtime needs it
-#   --pids-limit / --memory    cap blast radius of a runaway or hostile build
-#   source mounted :ro         the snapshot the container builds from cannot be mutated
-info "starting isolated container (--rm, cap-drop, read-only rootfs; nothing persists)..."
-docker run --rm -it \
-  --cap-drop ALL \
-  --security-opt no-new-privileges \
-  --read-only \
-  --tmpfs /work:exec,size=1g,uid=1000,gid=1000 \
-  --tmpfs /home/node:exec,size=1g,uid=1000,gid=1000 \
-  --tmpfs /tmp:size=256m,uid=1000,gid=1000 \
-  --pids-limit 512 \
-  --memory 4g \
-  -v "${SRC_DIR}:/src:ro" \
-  -e "OPIK_API_KEY=${OPIK_API_KEY}" \
-  -e "OPIK_URL_OVERRIDE=${OPIK_URL_OVERRIDE}" \
-  -e "OPIK_PROJECT_NAME=${OPIK_PROJECT_NAME:-openclaw}" \
-  -e "OPIK_WORKSPACE=${OPIK_WORKSPACE:-default}" \
-  -e "OPENAI_API_KEY=${OPENAI_API_KEY}" \
-  -e "OPENCLAW_LIVE_MODEL=${OPENCLAW_LIVE_MODEL:-gpt-4o-mini}" \
-  "${IMAGE_TAG}"
+# Run artifacts (span results etc.) land here so they survive container teardown.
+OUT_DIR="$(mktemp -d)"
+info "run artifacts: ${OUT_DIR}"
+
+# The hardening below is identical across providers: unprivileged, cap-drop ALL,
+# no-new-privileges, read-only rootfs with writable tmpfs only, pid/memory caps, and
+# the source mounted :ro. Nothing persists on exit.
+if [[ "${PROVIDER}" == "ollama" ]]; then
+  # Local LLM sidecar via compose — no model-provider account or key. The model is
+  # pulled into a named volume (once) and the gateway reaches it over a private network.
+  OLLAMA_MODEL="${OLLAMA_MODEL:-llama3.2:3b}"
+  COMPOSE_FILE="${REPO_ROOT}/docker/docker-compose.ollama.yml"
+  export SRC_DIR OUT_DIR OLLAMA_MODEL OPIK_API_KEY OPIK_URL_OVERRIDE
+  export OPIK_PROJECT_NAME="${OPIK_PROJECT_NAME:-openclaw}"
+  export OPIK_WORKSPACE="${OPIK_WORKSPACE:-default}"
+
+  compose() { docker compose -f "${COMPOSE_FILE}" -p opik-openclaw-e2e "$@"; }
+  cleanup() { compose down -v --remove-orphans >/dev/null 2>&1 || true; rm -rf "${SRC_DIR}" "${OUT_DIR}"; }
+  trap cleanup EXIT
+
+  info "starting Ollama sidecar and pulling model ${OLLAMA_MODEL} (first run downloads it)..."
+  compose up -d ollama
+  compose exec -T ollama ollama pull "${OLLAMA_MODEL}"
+
+  info "starting isolated tester container (provider=ollama; nothing persists)..."
+  compose run --rm tester
+else
+  # Real provider (OpenAI/Codex): the user's key is injected at runtime only.
+  info "starting isolated container (provider=openai, --rm, cap-drop, read-only rootfs)..."
+  trap 'rm -rf "${SRC_DIR}" "${OUT_DIR}"' EXIT
+  docker run --rm -it \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --read-only \
+    --tmpfs /work:exec,size=2g,uid=1000,gid=1000 \
+    --tmpfs /home/node:exec,size=3g,uid=1000,gid=1000 \
+    --tmpfs /tmp:size=512m,uid=1000,gid=1000 \
+    --pids-limit 512 \
+    --memory 4g \
+    -v "${SRC_DIR}:/src:ro" \
+    -v "${OUT_DIR}:/out" \
+    -e "MODEL_PROVIDER=openai" \
+    -e "OPIK_API_KEY=${OPIK_API_KEY}" \
+    -e "OPIK_URL_OVERRIDE=${OPIK_URL_OVERRIDE}" \
+    -e "OPIK_PROJECT_NAME=${OPIK_PROJECT_NAME:-openclaw}" \
+    -e "OPIK_WORKSPACE=${OPIK_WORKSPACE:-default}" \
+    -e "OPENAI_API_KEY=${OPENAI_API_KEY}" \
+    -e "OPENCLAW_LIVE_MODEL=${OPENCLAW_LIVE_MODEL:-gpt-4o-mini}" \
+    "${IMAGE_TAG}"
+fi
