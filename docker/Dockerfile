@@ -17,8 +17,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# OpenClaw version the plugin is built against (openclaw.build.openclawVersion).
-ARG OPENCLAW_VERSION=2026.3.2
+# OpenClaw version to test against. Defaults to latest so the tool tracks current
+# releases; pin via --build-arg OPENCLAW_VERSION=<version> for a reproducible run.
+ARG OPENCLAW_VERSION=latest
 ENV OPENCLAW_VERSION=${OPENCLAW_VERSION}
 
 # Keep the npm/npx cache outside paths that are masked by tmpfs at runtime, so the

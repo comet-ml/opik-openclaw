@@ -25,14 +25,16 @@
 #   OPIK_API_KEY, OPIK_URL_OVERRIDE, OPENAI_API_KEY
 # Optional env:
 #   OPIK_PROJECT_NAME (default: openclaw), OPIK_WORKSPACE (default: default),
-#   OPENCLAW_LIVE_MODEL (default: gpt-4o-mini), OPENCLAW_VERSION (default: 2026.3.2)
+#   OPENCLAW_LIVE_MODEL (default: gpt-4o-mini), OPENCLAW_VERSION (default: latest)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
 IMAGE_TAG="opik-openclaw-e2e:local"
-OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.3.2}"
+# Default to the latest published OpenClaw so the tool tracks current releases.
+# Pin via OPENCLAW_VERSION=<version> for a reproducible run.
+OPENCLAW_VERSION="${OPENCLAW_VERSION:-latest}"
 
 err() { printf '\033[31m[test-local] %s\033[0m\n' "$*" >&2; }
 info() { printf '\033[36m[test-local] %s\033[0m\n' "$*"; }

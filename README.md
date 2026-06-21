@@ -262,8 +262,8 @@ Run a PR, a branch, or the current working tree:
 
 The host runs only git: it checks out the PR/branch and exports a source snapshot
 with `git archive` (which executes no project code). The snapshot is mounted
-read-only into a clean Node 22 image that runs `openclaw@2026.3.2` (override with
-`OPENCLAW_VERSION`); the container does `npm ci && npm pack`, installs the build,
+read-only into a clean Node 22 image that runs the latest `openclaw` (pin a
+specific version with `OPENCLAW_VERSION`); the container does `npm ci && npm pack`, installs the build,
 starts the gateway, and drops you into a shell. List the configured agents, then
 run a turn that triggers tool calls:
 
