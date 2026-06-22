@@ -238,9 +238,11 @@ the host.
 Prerequisites:
 
 - Docker (with Compose)
-- Node.js `>=22.12.0` and npm `>=10` (used on the host to pack the plugin)
 - An Opik project to send traces to (see "Opik targets" below)
 - Optional: the GitHub `gh` CLI (used to check out PRs, including forks)
+
+The host only needs `git` and Docker — `npm ci` / `npm pack` run inside the
+container, so no Node.js/npm toolchain is required on the host.
 
 ### Model provider
 
