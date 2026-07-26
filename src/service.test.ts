@@ -312,12 +312,11 @@ describe("opik service", () => {
       const service = createOpikService(api as any);
       await service.start(createServiceContext() as any);
 
-      expect(api.on).toHaveBeenCalledTimes(10);
+      expect(api.on).toHaveBeenCalledTimes(9);
       expect(api.on).toHaveBeenCalledWith("llm_input", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("llm_output", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("before_tool_call", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("after_tool_call", expect.any(Function));
-      expect(api.on).toHaveBeenCalledWith("subagent_spawning", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_delivery_target", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_spawned", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_ended", expect.any(Function));
@@ -1383,7 +1382,7 @@ describe("opik service", () => {
       );
       invokeHook(
         hooks,
-        "subagent_spawning",
+        "subagent_spawned",
         {
           childSessionKey: "child-session",
           agentId: "writer",
@@ -1534,7 +1533,7 @@ describe("opik service", () => {
 
       invokeHook(
         hooks,
-        "subagent_spawning",
+        "subagent_spawned",
         {
           childSessionKey: "child-session",
           agentId: "writer",
@@ -1616,7 +1615,7 @@ describe("opik service", () => {
 
       invokeHook(
         hooks,
-        "subagent_spawning",
+        "subagent_spawned",
         {
           childSessionKey: "child-session",
           agentId: "writer",
@@ -1686,7 +1685,7 @@ describe("opik service", () => {
       );
       invokeHook(
         hooks,
-        "subagent_spawning",
+        "subagent_spawned",
         {
           childSessionKey: "child-session",
           agentId: "writer",
@@ -1703,7 +1702,7 @@ describe("opik service", () => {
 
       invokeHook(
         hooks,
-        "subagent_spawning",
+        "subagent_spawned",
         {
           childSessionKey: "grandchild-session",
           agentId: "reviewer",
