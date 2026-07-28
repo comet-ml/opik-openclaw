@@ -28,7 +28,7 @@
 
 ## Why This Plugin
 
-[Opik](https://github.com/comet-ml/opik) is a leading open-source LLM and agent observability, tracing, evaluation and optimization platform.
+[Opik](https://github.com/comet-ml/opik) is the open-source LLM observability and evaluation platform, built by [Comet](https://www.comet.com).
 `@opik/opik-openclaw` adds native Opik tracing for OpenClaw runs:
 
 - LLM request/response spans
