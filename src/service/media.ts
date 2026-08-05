@@ -30,8 +30,10 @@ const MEDIA_EXTENSIONS = new Set([
   ".mkv",
 ]);
 
+// Reject the media:// authority form (e.g. OpenClaw media://inbound/...) — those are
+// logical URIs, not local paths, and must not be normalized to /inbound/... and stat'd.
 const MEDIA_SCHEME_LOCAL_PATH_RE =
-  /\bmedia:((?:~\/|\/)[^\s"'`]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|mp3|wav|m4a|aac|ogg|oga|flac|opus|caf|weba|webm|mp4|mov|mkv))(?=[\s"'`]|$)/gi;
+  /\bmedia:(?!\/\/)((?:~\/|\/)[^\s"'`]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|mp3|wav|m4a|aac|ogg|oga|flac|opus|caf|weba|webm|mp4|mov|mkv))(?=[\s"'`]|$)/gi;
 
 const FILE_SCHEME_LOCAL_PATH_RE =
   /\bfile:\/\/((?:~\/|\/)[^\s"'`]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|mp3|wav|m4a|aac|ogg|oga|flac|opus|caf|weba|webm|mp4|mov|mkv))(?:\?[^\s"'`]*)?(?=[\s"'`]|$)/gi;
