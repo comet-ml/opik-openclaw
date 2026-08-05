@@ -90,6 +90,8 @@ export type ActiveTrace = {
     usageCacheWrite?: number;
     usageTotal?: number;
   };
+  /** Tool call ids already closed for this trace, used to dedupe after-only observations. */
+  completedToolCallIds: Set<string>;
   /** Accumulated usage from llm_output events. */
   usage: {
     input?: number;

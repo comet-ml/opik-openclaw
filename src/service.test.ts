@@ -1215,9 +1215,13 @@ describe("opik service", () => {
       expect(mockToolSpan.end).toHaveBeenCalled();
     });
 
-    test("no-ops when no matching tool span", async () => {
+    test("creates an after-only span when no matching tool span exists", async () => {
       const { api, hooks } = createApi();
       const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockToolSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -1225,20 +1229,61 @@ describe("opik service", () => {
 
       invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
 
-      // Call after_tool_call without a prior before_tool_call
       invokeHook(
         hooks,
         "after_tool_call",
         {
           toolName: "unknown_tool",
+          params: { command: "echo ok" },
           result: "data",
+          runId: "run-1",
+          toolCallId: "native-call-1",
+          durationMs: 25,
         },
         toolCtx("s1"),
       );
 
-      // The LLM span is the only one created — no tool span update/end
-      // trace.span called once for LLM span only (from llm_input)
       expect(mockTrace.span).toHaveBeenCalledTimes(1);
+      expect(mockLlmSpan.span).toHaveBeenCalledWith({
+        name: "unknown_tool",
+        type: "tool",
+        input: { command: "echo ok" },
+        metadata: { durationMs: 25, runId: "run-1", toolCallId: "native-call-1" },
+      });
+      expect(mockToolSpan.update).toHaveBeenCalledWith({
+        input: { command: "echo ok" },
+        metadata: { durationMs: 25, runId: "run-1", toolCallId: "native-call-1" },
+        output: { result: "data" },
+      });
+      expect(mockToolSpan.end).toHaveBeenCalledTimes(1);
+    });
+
+    test("dedupes repeated after-only tool observations by run and tool call id", async () => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockToolSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+
+      const event = {
+        toolName: "bash",
+        result: { status: "completed" },
+        runId: "run-1",
+        toolCallId: "native-call-1",
+      };
+      invokeHook(hooks, "after_tool_call", event, toolCtx("s1"));
+      invokeHook(hooks, "after_tool_call", event, toolCtx("s1"));
+
+      expect(mockLlmSpan.span).toHaveBeenCalledTimes(1);
+      expect(mockToolSpan.update).toHaveBeenCalledTimes(1);
+      expect(mockToolSpan.end).toHaveBeenCalledTimes(1);
     });
 
     test("falls back when after_tool_call context is missing sessionKey", async () => {
