@@ -1,9 +1,9 @@
+import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
+import { onDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type {
-  DiagnosticEventPayload,
   OpenClawPluginApi,
   OpenClawPluginService,
-} from "openclaw/plugin-sdk";
-import { onDiagnosticEvent } from "openclaw/plugin-sdk";
+} from "openclaw/plugin-sdk/plugin-entry";
 import type { Opik, Span, Trace } from "opik";
 import { createAttachmentUploader } from "./service/attachment-uploader.js";
 import { registerLlmHooks } from "./service/hooks/llm.js";
@@ -565,12 +565,8 @@ export function createOpikService(
       }
 
       try {
-        const eventObj = event as Record<string, unknown>;
-        const message = eventObj.message;
-        if (!message || typeof message !== "object") return;
-
-        const sanitizedMessage = sanitizeValueForOpik(message);
-        if (sanitizedMessage !== message) {
+        const sanitizedMessage = sanitizeValueForOpik(event.message);
+        if (sanitizedMessage !== event.message) {
           return { message: sanitizedMessage };
         }
       } catch (err) {

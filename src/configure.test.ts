@@ -71,7 +71,7 @@ describe("configure helpers", () => {
 
 describe("opik status command", () => {
   test("reads plugin entry and masks api key", async () => {
-    const loadConfig = () =>
+    const currentConfig = () =>
       ({
         plugins: {
           entries: {
@@ -92,8 +92,8 @@ describe("opik status command", () => {
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     showOpikStatus({
-      loadConfig,
-      writeConfigFile: async () => undefined,
+      currentConfig,
+      mutateConfig: async () => undefined,
     });
     const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
     logSpy.mockRestore();
@@ -108,7 +108,7 @@ describe("opik status command", () => {
 
     registerOpikCli({
       program,
-      loadConfig: () =>
+      currentConfig: () =>
         ({
           plugins: {
             entries: {
@@ -126,7 +126,7 @@ describe("opik status command", () => {
             },
           },
         }) as any,
-      writeConfigFile: async () => undefined,
+      mutateConfig: async () => undefined,
     });
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);

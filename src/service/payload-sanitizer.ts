@@ -27,6 +27,7 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   return proto === Object.prototype || proto === null;
 }
 
+export function sanitizeValueForOpik<T>(value: T): T;
 export function sanitizeValueForOpik(value: unknown): unknown {
   if (typeof value === "string") {
     return sanitizeStringForOpik(value);

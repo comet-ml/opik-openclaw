@@ -53,7 +53,7 @@ const diagnosticSubscriptionMode = vi.hoisted(() => ({
   value: "function" as "function" | "object",
 }));
 
-vi.mock("openclaw/plugin-sdk", () => ({
+vi.mock("openclaw/plugin-sdk/diagnostic-runtime", () => ({
   onDiagnosticEvent: (listener: (evt: unknown) => void) => {
     diagnosticListeners.push(listener);
     const unsubscribe = () => {
