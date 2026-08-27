@@ -201,8 +201,6 @@ jobs:
           else
             npm publish "./release-artifacts/${{ needs.validate.outputs.tarball_name }}" --provenance --access public
           fi
-        env:
-          NODE_AUTH_TOKEN: ""
 
   publish-clawhub:
     needs: validate
