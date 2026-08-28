@@ -92,7 +92,7 @@ describeMaybe("opik service e2e", () => {
 
       invokeHook(
         hooks,
-        "subagent_spawning",
+        "subagent_spawned",
         {
           childSessionKey,
           agentId: "agent-sub",

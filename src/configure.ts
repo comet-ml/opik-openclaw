@@ -1,10 +1,10 @@
 import * as p from "@clack/prompts";
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/plugin-entry";
 import type { OpikPluginConfig } from "./types.js";
 
 type ConfigDeps = {
-  loadConfig: () => OpenClawConfig;
-  writeConfigFile: (cfg: OpenClawConfig) => Promise<void>;
+  currentConfig: () => OpenClawConfig;
+  mutateConfig: (mutate: (draft: OpenClawConfig) => void) => Promise<void>;
 };
 
 /** Opik Cloud host (matches SDK's DEFAULT_HOST_URL). */
@@ -368,7 +368,7 @@ export async function runOpikConfigure(deps: ConfigDeps): Promise<void> {
 
   // Step 6: Build API URL from host and write config
   const apiUrl = buildOpikApiUrl(host);
-  const cfg = deps.loadConfig();
+  const cfg = deps.currentConfig();
   const existingOpik = getOpikPluginEntry(cfg).config as OpikPluginConfig;
 
   const nextOpik: OpikPluginConfig = {
@@ -380,9 +380,9 @@ export async function runOpikConfigure(deps: ConfigDeps): Promise<void> {
     projectName,
   };
 
-  const nextCfg = setOpikPluginEntry(cfg, nextOpik, true);
-
-  await deps.writeConfigFile(nextCfg);
+  await deps.mutateConfig((draft) => {
+    Object.assign(draft, setOpikPluginEntry(draft, nextOpik, true));
+  });
 
   const projectsUrl = buildProjectsUrl(host, workspaceName);
 
@@ -405,7 +405,7 @@ export async function runOpikConfigure(deps: ConfigDeps): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export function showOpikStatus(deps: ConfigDeps): void {
-  const cfg = deps.loadConfig();
+  const cfg = deps.currentConfig();
   const entry = getOpikPluginEntry(cfg);
   const opik = entry.config;
 
