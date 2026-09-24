@@ -1,8 +1,8 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/plugin-entry";
 
 type ConfigDeps = {
-  loadConfig: () => OpenClawConfig;
-  writeConfigFile: (cfg: OpenClawConfig) => Promise<void>;
+  currentConfig: () => OpenClawConfig;
+  mutateConfig: (mutate: (draft: OpenClawConfig) => void) => Promise<void>;
 };
 
 type RegisterOpikCliParams = {
@@ -20,8 +20,8 @@ async function showStatusLazy(deps: ConfigDeps): Promise<void> {
 }
 
 export function registerOpikCli(params: RegisterOpikCliParams): void {
-  const { program, loadConfig, writeConfigFile } = params;
-  const deps: ConfigDeps = { loadConfig, writeConfigFile };
+  const { program, currentConfig, mutateConfig } = params;
+  const deps: ConfigDeps = { currentConfig, mutateConfig };
 
   const root = program.command("opik").description("Opik trace export integration");
 

@@ -1,4 +1,4 @@
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import type { Opik, Span, Trace } from "opik";
 import type { ActiveTrace } from "../../types.js";
 import { asNonEmptyString, resolveRunId, resolveToolCallId } from "../helpers.js";

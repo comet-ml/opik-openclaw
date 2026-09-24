@@ -174,8 +174,7 @@ image refs in persisted tool transcript messages via `tool_result_persist`.
 | `llm_output` | llm span update/end | writes usage/output and closes span |
 | `before_tool_call` | tool span start | captures tool name + input |
 | `after_tool_call` | tool span update/end | captures output/error + duration |
-| `subagent_spawning` | subagent span start | starts subagent lifecycle span on requester trace |
-| `subagent_spawned` | subagent span update | enriches subagent span with run metadata |
+| `subagent_spawned` | subagent span start/update | starts or enriches subagent lifecycle span on requester trace |
 | `subagent_ended` | subagent span update/end | finalizes subagent span with outcome/error |
 | `agent_end` | trace finalize | closes pending spans and trace |
 

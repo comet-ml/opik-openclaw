@@ -13,7 +13,8 @@ vi.mock("opik", () => ({
   disableLogger: vi.fn(),
 }));
 
-vi.mock("openclaw/plugin-sdk", () => ({
+vi.mock("openclaw/plugin-sdk/plugin-entry", () => ({
+  definePluginEntry: (definition: unknown) => definition,
   emptyPluginConfigSchema,
 }));
 
@@ -32,8 +33,8 @@ describe("plugin smoke", () => {
       registerCli,
       runtime: {
         config: {
-          loadConfig: () => ({}),
-          writeConfigFile: async () => undefined,
+          current: () => ({}),
+          mutateConfigFile: async () => ({ changed: false }),
         },
       },
     } as any);
