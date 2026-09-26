@@ -14,6 +14,18 @@ describe("media path extraction", () => {
     expect([...target]).toEqual(["/tmp/image.png"]);
   });
 
+  test("ignores media:// authority URIs instead of normalizing them to local paths", () => {
+    const target = new Set<string>();
+    collectMediaPathsFromString("media://inbound/example.jpg", target);
+    expect(target.size).toBe(0);
+  });
+
+  test("ignores media:// authority URIs with a host segment", () => {
+    const target = new Set<string>();
+    collectMediaPathsFromString("see media://host/path/to/example.jpg now", target);
+    expect(target.size).toBe(0);
+  });
+
   test("collects file:// local path references", () => {
     const target = new Set<string>();
     collectMediaPathsFromString("open file:///tmp/image.png", target);

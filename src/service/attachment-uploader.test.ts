@@ -218,6 +218,31 @@ describe("attachment uploader", () => {
     expect(attachmentsApi.startMultiPartUpload).not.toHaveBeenCalled();
   });
 
+  test("ignores OpenClaw media:// authority URIs without attempting an upload or warning", async () => {
+    const attachmentsApi = createAttachmentsApi();
+    const client = { api: { attachments: attachmentsApi } };
+    const onWarn = vi.fn();
+
+    const uploader = createAttachmentUploader({
+      getClient: () => client as unknown as Opik,
+      getAttachmentBaseUrl: () => "https://www.comet.com/opik/api",
+      onWarn,
+      formatError: (err) => String(err),
+    });
+
+    uploader.scheduleMediaAttachmentUploads({
+      entityType: "trace",
+      entity: { id: "trace-1" },
+      projectName: "openclaw",
+      reason: "media-authority-uri",
+      payloads: ["media://inbound/example.jpg"],
+    });
+    await uploader.waitForUploads();
+
+    expect(attachmentsApi.startMultiPartUpload).not.toHaveBeenCalled();
+    expect(onWarn).not.toHaveBeenCalled();
+  });
+
   test("uploads multipart attachments without loading the whole file into one request body", async () => {
     const largeContents = Buffer.alloc(ATTACHMENT_UPLOAD_PART_SIZE_BYTES + 32, 0x61);
     const { dir, filePath } = await createTempMediaFile(".png", largeContents);
