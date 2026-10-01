@@ -1010,6 +1010,147 @@ describe("opik service", () => {
   });
 
   // =========================================================================
+  // 4b. tool calls whose before_tool_call carries no session context
+  //     (OpenClaw passes only toolName + toolCallId for bundle-MCP tools)
+  // =========================================================================
+  describe("tool calls without session context in before_tool_call", () => {
+    const MCP_TOOL = "echo-mcp__mcp_echo";
+    const MCP_CALL_ID = "echo-mcp__mcp_echo_1790875647391_1";
+
+    test("with one active trace, the span is created under the LLM span and closed by after_tool_call", async () => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockToolSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        { toolName: MCP_TOOL, params: { text: "hi" } },
+        { toolName: MCP_TOOL, toolCallId: MCP_CALL_ID },
+      );
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        { toolName: MCP_TOOL, params: { text: "hi" }, result: "mcp:hi", durationMs: 80 },
+        toolCtx("s1", { agentId: "agent-1", toolName: MCP_TOOL, toolCallId: MCP_CALL_ID }),
+      );
+
+      expect(mockLlmSpan.span).toHaveBeenCalledTimes(1);
+      expect(mockLlmSpan.span).toHaveBeenCalledWith(
+        expect.objectContaining({ name: MCP_TOOL, type: "tool" }),
+      );
+      expect(mockToolSpan.update).toHaveBeenCalledWith(
+        expect.objectContaining({ output: { result: "mcp:hi" } }),
+      );
+      expect(mockToolSpan.end).toHaveBeenCalledTimes(1);
+    });
+
+    test("with several active traces, after_tool_call backfills the span in its own session", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-01T12:00:00.000Z"));
+      try {
+        const { api, hooks } = createApi();
+        const traceS1 = opikState.createMockTrace();
+        const traceS2 = opikState.createMockTrace();
+        const llmS1 = opikState.createMockSpan();
+        const llmS2 = opikState.createMockSpan();
+        const backfilled = opikState.createMockSpan();
+        traceS1.span.mockReturnValueOnce(llmS1);
+        traceS2.span.mockReturnValueOnce(llmS2);
+        llmS2.span.mockReturnValueOnce(backfilled);
+        mockTraceFn.mockReturnValueOnce(traceS1).mockReturnValueOnce(traceS2);
+
+        const service = createOpikService(api as any);
+        await service.start(createServiceContext() as any);
+
+        invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1", { agentId: "a1" }));
+        invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s2", { agentId: "a2" }));
+        invokeHook(
+          hooks,
+          "before_tool_call",
+          { toolName: MCP_TOOL, params: { text: "hi" } },
+          { toolName: MCP_TOOL, toolCallId: MCP_CALL_ID },
+        );
+        expect(llmS1.span).not.toHaveBeenCalled();
+        expect(llmS2.span).not.toHaveBeenCalled();
+
+        invokeHook(
+          hooks,
+          "after_tool_call",
+          { toolName: MCP_TOOL, params: { text: "hi" }, result: "mcp:hi", durationMs: 250 },
+          toolCtx("s2", { agentId: "a2", toolName: MCP_TOOL, toolCallId: MCP_CALL_ID }),
+        );
+
+        expect(llmS1.span).not.toHaveBeenCalled();
+        expect(llmS2.span).toHaveBeenCalledTimes(1);
+        expect(llmS2.span).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: MCP_TOOL,
+            type: "tool",
+            startTime: new Date("2026-10-01T11:59:59.750Z"),
+            metadata: expect.objectContaining({ backfilled: true, toolCallId: MCP_CALL_ID }),
+          }),
+        );
+        expect(backfilled.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            output: { result: "mcp:hi" },
+            metadata: expect.objectContaining({ backfilled: true, durationMs: 250 }),
+          }),
+        );
+        expect(backfilled.end).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    test("a backfilled span without durationMs starts at the time after_tool_call fires", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-01T12:00:00.000Z"));
+      try {
+        const { api, hooks } = createApi();
+        const traceS1 = opikState.createMockTrace();
+        const traceS2 = opikState.createMockTrace();
+        const llmS2 = opikState.createMockSpan();
+        traceS1.span.mockReturnValueOnce(opikState.createMockSpan());
+        traceS2.span.mockReturnValueOnce(llmS2);
+        mockTraceFn.mockReturnValueOnce(traceS1).mockReturnValueOnce(traceS2);
+
+        const service = createOpikService(api as any);
+        await service.start(createServiceContext() as any);
+
+        invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1", { agentId: "a1" }));
+        invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s2", { agentId: "a2" }));
+        invokeHook(
+          hooks,
+          "before_tool_call",
+          { toolName: MCP_TOOL, params: {} },
+          { toolName: MCP_TOOL, toolCallId: MCP_CALL_ID },
+        );
+        invokeHook(
+          hooks,
+          "after_tool_call",
+          { toolName: MCP_TOOL, params: {}, result: "ok" },
+          toolCtx("s2", { agentId: "a2", toolName: MCP_TOOL, toolCallId: MCP_CALL_ID }),
+        );
+
+        expect(llmS2.span).toHaveBeenCalledWith(
+          expect.objectContaining({ startTime: new Date("2026-10-01T12:00:00.000Z") }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  // =========================================================================
   // 5. after_tool_call hook
   // =========================================================================
   describe("after_tool_call hook", () => {
@@ -1218,6 +1359,8 @@ describe("opik service", () => {
     test("no-ops when no matching tool span", async () => {
       const { api, hooks } = createApi();
       const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
       mockTraceFn.mockReturnValue(mockTrace);
 
       const service = createOpikService(api as any);
@@ -1236,9 +1379,31 @@ describe("opik service", () => {
         toolCtx("s1"),
       );
 
-      // The LLM span is the only one created — no tool span update/end
-      // trace.span called once for LLM span only (from llm_input)
+      // The LLM span is the only one created — no tool span update/end.
+      // Backfill is only for calls before_tool_call skipped, so none here either.
       expect(mockTrace.span).toHaveBeenCalledTimes(1);
+      expect(mockLlmSpan.span).not.toHaveBeenCalled();
+    });
+
+    test("does not create a second span when after_tool_call fires again for the same call", async () => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockToolSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+      invokeHook(hooks, "before_tool_call", { toolName: "search", params: {} }, toolCtx("s1"));
+      invokeHook(hooks, "after_tool_call", { toolName: "search", result: "a" }, toolCtx("s1"));
+      invokeHook(hooks, "after_tool_call", { toolName: "search", result: "a" }, toolCtx("s1"));
+
+      expect(mockLlmSpan.span).toHaveBeenCalledTimes(1);
+      expect(mockToolSpan.end).toHaveBeenCalledTimes(1);
     });
 
     test("falls back when after_tool_call context is missing sessionKey", async () => {

@@ -11,10 +11,8 @@ type ToolHooksDeps = {
   sessionByAgentId: Map<string, string>;
   getLastActiveSessionKey: () => string | undefined;
   rememberSessionCorrelation: (sessionKey: string, agentId?: unknown) => void;
-  resolveSessionSpanContainer: (
-    sessionKey: string,
-  ) => { sessionKey: string; active: ActiveTrace; parent: Trace | Span } | undefined;
-  warnMissingAfterToolSessionKey: (fallbackMode: string) => void;
+  resolveSessionSpanContainer: (sessionKey: string) => SessionSpanContainer | undefined;
+  warnMissingAfterToolSessionKey: (fallbackMode: SessionFallbackMode) => void;
   nextSpanSeq: () => number;
   safeSpanUpdate: (span: Span, payload: Record<string, unknown>, reason: string) => void;
   safeSpanEnd: (span: Span, reason: string) => void;
@@ -30,25 +28,103 @@ type ToolHooksDeps = {
   formatError: (err: unknown) => string;
 };
 
+export type SessionFallbackMode = "agentId" | "single active trace" | "last active session";
+
+type SessionSpanContainer = { sessionKey: string; active: ActiveTrace; parent: Trace | Span };
+
+// Bounds the skipped-call set if after_tool_call never arrives for some of them.
+const MAX_SKIPPED_TOOL_CALLS = 500;
+
+/**
+ * Finds the session a tool call belongs to when OpenClaw leaves `sessionKey` out of the hook
+ * context (it does for bundle-MCP tools in before_tool_call). `allowLastActive` permits the
+ * last-active-session guess, which can pick the wrong session when several run at once.
+ */
+function resolveToolSessionKey(
+  deps: ToolHooksDeps,
+  toolCtx: { sessionKey?: string; agentId?: string },
+  { allowLastActive }: { allowLastActive: boolean },
+): { sessionKey?: string; fallbackMode?: SessionFallbackMode } {
+  if (toolCtx.sessionKey) return { sessionKey: toolCtx.sessionKey };
+  if (typeof toolCtx.agentId === "string" && toolCtx.agentId.length > 0) {
+    const byAgentId = deps.sessionByAgentId.get(toolCtx.agentId);
+    if (byAgentId && deps.activeTraces.has(byAgentId)) {
+      return { sessionKey: byAgentId, fallbackMode: "agentId" };
+    }
+  }
+  if (deps.activeTraces.size === 1) {
+    return {
+      sessionKey: deps.activeTraces.keys().next().value as string | undefined,
+      fallbackMode: "single active trace",
+    };
+  }
+  if (allowLastActive) {
+    const lastActiveSessionKey = deps.getLastActiveSessionKey();
+    if (lastActiveSessionKey && deps.activeTraces.has(lastActiveSessionKey)) {
+      return { sessionKey: lastActiveSessionKey, fallbackMode: "last active session" };
+    }
+  }
+  return {};
+}
+
+/** Creates a tool span under the session's active LLM span, or under the session container. */
+function createToolSpan(
+  deps: ToolHooksDeps,
+  container: SessionSpanContainer,
+  sessionKey: string,
+  span: { toolName: string; params: unknown; metadata: Record<string, unknown>; startTime?: Date },
+): Span | undefined {
+  const parent =
+    container.sessionKey === sessionKey && container.active.llmSpan
+      ? container.active.llmSpan
+      : container.parent;
+  try {
+    return parent.span({
+      name: span.toolName,
+      type: "tool",
+      input: sanitizeValueForOpik(span.params) as any,
+      ...(span.startTime ? { startTime: span.startTime } : {}),
+      ...(Object.keys(span.metadata).length > 0 ? { metadata: span.metadata } : {}),
+    });
+  } catch (err) {
+    deps.warn(
+      `opik: tool span creation failed (sessionKey=${sessionKey}, tool=${span.toolName}): ${deps.formatError(err)}`,
+    );
+    return undefined;
+  }
+}
+
 export function registerToolHooks(deps: ToolHooksDeps): void {
+  // toolCallIds whose before_tool_call couldn't be tied to a session; after_tool_call backfills
+  // spans for these and only these, so an unmatched call never produces a duplicate span.
+  const skippedToolCallIds = new Set<string>();
+
   deps.api.on("before_tool_call", (event, toolCtx) => {
     if (!deps.getClient()) return;
-    const sessionKey = toolCtx.sessionKey;
-    if (!sessionKey) return;
+    const eventObj = event as Record<string, unknown>;
+    const ctxObj = toolCtx as Record<string, unknown>;
+    const toolCallId = resolveToolCallId(eventObj, ctxObj);
+    // Only an unambiguous guess here: a wrong session would put the span in another trace, and
+    // after_tool_call (which gets the full context) creates the span when we can't tell.
+    const { sessionKey } = resolveToolSessionKey(deps, toolCtx, { allowLastActive: false });
+    if (!sessionKey) {
+      if (toolCallId) {
+        if (skippedToolCallIds.size >= MAX_SKIPPED_TOOL_CALLS) {
+          skippedToolCallIds.delete(skippedToolCallIds.values().next().value as string);
+        }
+        skippedToolCallIds.add(toolCallId);
+      }
+      return;
+    }
     deps.rememberSessionCorrelation(sessionKey, toolCtx.agentId);
 
     const container = deps.resolveSessionSpanContainer(sessionKey);
     if (!container) return;
     const active = container.active;
-    const toolParent =
-      container.sessionKey === sessionKey && active.llmSpan ? active.llmSpan : container.parent;
 
     active.lastActivityAt = Date.now();
 
-    const eventObj = event as Record<string, unknown>;
-    const ctxObj = toolCtx as Record<string, unknown>;
     const runId = resolveRunId(eventObj, ctxObj);
-    const toolCallId = resolveToolCallId(eventObj, ctxObj);
     const sessionId = asNonEmptyString(ctxObj.sessionId);
 
     const spanMetadata: Record<string, unknown> = {
@@ -58,20 +134,12 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
       ...(toolCallId ? { toolCallId } : {}),
     };
 
-    let toolSpan: Span;
-    try {
-      toolSpan = toolParent.span({
-        name: event.toolName,
-        type: "tool",
-        input: sanitizeValueForOpik(event.params) as any,
-        ...(Object.keys(spanMetadata).length > 0 ? { metadata: spanMetadata } : {}),
-      });
-    } catch (err) {
-      deps.warn(
-        `opik: tool span creation failed (sessionKey=${sessionKey}, tool=${event.toolName}): ${deps.formatError(err)}`,
-      );
-      return;
-    }
+    const toolSpan = createToolSpan(deps, container, sessionKey, {
+      toolName: event.toolName,
+      params: event.params,
+      metadata: spanMetadata,
+    });
+    if (!toolSpan) return;
 
     const spanKey = toolCallId
       ? `session:${sessionKey}:toolcall:${toolCallId}`
@@ -105,29 +173,11 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
     const toolCallId = resolveToolCallId(eventObj, ctxObj);
     const sessionId = asNonEmptyString(ctxObj.sessionId);
 
-    let sessionKey = toolCtx.sessionKey;
-    let fallbackMode: "agentId" | "single active trace" | "last active session" | undefined;
-    if (!sessionKey) {
-      if (typeof toolCtx.agentId === "string" && toolCtx.agentId.length > 0) {
-        const byAgentId = deps.sessionByAgentId.get(toolCtx.agentId);
-        if (byAgentId && deps.activeTraces.has(byAgentId)) {
-          sessionKey = byAgentId;
-          fallbackMode = "agentId";
-        }
-      }
-      if (!sessionKey && deps.activeTraces.size === 1) {
-        sessionKey = deps.activeTraces.keys().next().value as string | undefined;
-        fallbackMode = "single active trace";
-      } else if (!sessionKey) {
-        const lastActiveSessionKey = deps.getLastActiveSessionKey();
-        if (lastActiveSessionKey && deps.activeTraces.has(lastActiveSessionKey)) {
-          sessionKey = lastActiveSessionKey;
-          fallbackMode = "last active session";
-        }
-      }
-      if (sessionKey && fallbackMode) {
-        deps.warnMissingAfterToolSessionKey(fallbackMode);
-      }
+    const { sessionKey, fallbackMode } = resolveToolSessionKey(deps, toolCtx, {
+      allowLastActive: true,
+    });
+    if (sessionKey && fallbackMode) {
+      deps.warnMissingAfterToolSessionKey(fallbackMode);
     }
     if (!sessionKey) return;
     deps.rememberSessionCorrelation(sessionKey, toolCtx.agentId);
@@ -157,13 +207,30 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
         }
       }
     }
-    if (!matchedKey || !matchedSpan) return;
+    const isBackfill = !matchedSpan && !!toolCallId && skippedToolCallIds.has(toolCallId);
+    if (toolCallId) skippedToolCallIds.delete(toolCallId);
+    if (isBackfill) {
+      // before_tool_call had no usable session context (bundle-MCP tools) and we couldn't guess
+      // it safely. Create the span now, in the session this call reports, back-dated by its duration.
+      const durationMs =
+        typeof event.durationMs === "number" && Number.isFinite(event.durationMs) && event.durationMs >= 0
+          ? event.durationMs
+          : 0;
+      matchedSpan = createToolSpan(deps, container, sessionKey, {
+        toolName: event.toolName,
+        params: event.params,
+        metadata: { backfilled: true, toolCallId },
+        startTime: new Date(Date.now() - durationMs),
+      });
+    }
+    if (!matchedSpan) return;
 
     const spanUpdate: Record<string, unknown> = {};
     if (event.params && typeof event.params === "object" && !Array.isArray(event.params)) {
       spanUpdate.input = sanitizeValueForOpik(event.params) as Record<string, unknown>;
     }
     const spanMetadata: Record<string, unknown> = {
+      ...(isBackfill ? { backfilled: true } : {}),
       ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
       ...(toolCtx.agentId ? { agentId: toolCtx.agentId } : {}),
       ...(sessionId ? { sessionId } : {}),
@@ -210,6 +277,6 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
       matchedSpan,
       `after_tool_call sessionKey=${sessionKey} tool=${event.toolName} key=${matchedKey}`,
     );
-    active.toolSpans.delete(matchedKey);
+    if (matchedKey) active.toolSpans.delete(matchedKey);
   });
 }

@@ -8,7 +8,7 @@ import type { Opik, Span, Trace } from "opik";
 import { createAttachmentUploader } from "./service/attachment-uploader.js";
 import { registerLlmHooks } from "./service/hooks/llm.js";
 import { registerSubagentHooks } from "./service/hooks/subagent.js";
-import { registerToolHooks } from "./service/hooks/tool.js";
+import { registerToolHooks, type SessionFallbackMode } from "./service/hooks/tool.js";
 import {
   ATTACHMENT_UPLOADS_ENABLED,
   DEFAULT_ATTACHMENT_BASE_URL,
@@ -222,7 +222,7 @@ export function createOpikService(
     }
   }
 
-  function warnMissingAfterToolSessionKey(fallbackMode: string): void {
+  function warnMissingAfterToolSessionKey(fallbackMode: SessionFallbackMode): void {
     if (warnedMissingAfterToolSessionKey) return;
     warnedMissingAfterToolSessionKey = true;
     log.warn(
