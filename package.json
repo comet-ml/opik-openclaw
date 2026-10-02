@@ -30,7 +30,7 @@
     "zod": "^4.3.6"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.3.2"
+    "openclaw": ">=2026.9.7"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -74,12 +74,12 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.3.2",
-      "minGatewayVersion": "2026.3.2"
+      "pluginApi": ">=2026.9.7",
+      "minGatewayVersion": "2026.9.7"
     },
     "build": {
-      "openclawVersion": "2026.3.2",
-      "pluginSdkVersion": "2026.3.2"
+      "openclawVersion": "2026.9.7",
+      "pluginSdkVersion": "2026.9.7"
     }
   }
 }

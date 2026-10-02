@@ -33,6 +33,10 @@ type LlmHooksDeps = {
   }) => void;
   warn: (message: string) => void;
   formatError: (err: unknown) => string;
+  /** Finalizes the trace now if agent_end already came and was waiting for this llm_output. */
+  finalizeAfterAgentEnd: (sessionKey: string) => void;
+  /** Finalizes a trace whose turn already ended, before a new turn in the same session starts. */
+  finalizeEndedTurn: (sessionKey: string) => void;
 };
 
 export function registerLlmHooks(deps: LlmHooksDeps): void {
@@ -57,6 +61,10 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
       imagesCount: event.imagesCount,
     }) as Record<string, unknown>;
 
+    // A new turn inside the grace window after agent_end belongs to a new trace.
+    if (deps.activeTraces.get(sessionKey)?.pendingFinalize) {
+      deps.finalizeEndedTurn(sessionKey);
+    }
     const existing = deps.activeTraces.get(sessionKey);
     let trace: Trace;
     if (existing) {
@@ -202,5 +210,6 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
 
     deps.safeSpanEnd(active.llmSpan, `llm_output sessionKey=${sessionKey}`);
     active.llmSpan = null;
+    deps.finalizeAfterAgentEnd(sessionKey);
   });
 }

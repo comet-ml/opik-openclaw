@@ -42,8 +42,11 @@ declare module "openclaw/plugin-sdk" {
     ) => void;
     runtime: {
       config: {
-        loadConfig: () => OpenClawConfig;
-        writeConfigFile: (cfg: OpenClawConfig) => Promise<void>;
+        current: () => OpenClawConfig;
+        mutateConfigFile: (params: {
+          afterWrite?: { mode: "auto" | "restart" | "none"; reason?: string };
+          mutate: (draft: OpenClawConfig) => void | Promise<void>;
+        }) => Promise<unknown>;
       };
     };
     on: (event: string, handler: (event: any, ctx: any) => void) => void;
@@ -54,4 +57,15 @@ declare module "openclaw/plugin-sdk" {
   ): () => void;
 
   export function emptyPluginConfigSchema(): unknown;
+}
+
+// OpenClaw removed the root `openclaw/plugin-sdk` barrel in its July 2026 SDK sweep. Runtime
+// imports must use these subpaths;
+// type-only imports of the root module above are erased at build time.
+declare module "openclaw/plugin-sdk/core" {
+  export { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
+}
+
+declare module "openclaw/plugin-sdk/diagnostic-runtime" {
+  export { onDiagnosticEvent } from "openclaw/plugin-sdk";
 }

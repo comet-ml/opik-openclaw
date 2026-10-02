@@ -13,11 +13,11 @@ vi.mock("opik", () => ({
   disableLogger: vi.fn(),
 }));
 
-vi.mock("openclaw/plugin-sdk", () => ({
+vi.mock("openclaw/plugin-sdk/core", () => ({
   emptyPluginConfigSchema,
 }));
 
-import plugin from "../index.js";
+import plugin, { createConfigDeps } from "../index.js";
 
 describe("plugin smoke", () => {
   test("registers service and CLI commands", () => {
@@ -32,8 +32,8 @@ describe("plugin smoke", () => {
       registerCli,
       runtime: {
         config: {
-          loadConfig: () => ({}),
-          writeConfigFile: async () => undefined,
+          current: () => ({}),
+          mutateConfigFile: async () => undefined,
         },
       },
     } as any);
@@ -85,5 +85,36 @@ describe("plugin smoke", () => {
     expect(packageJson.openclaw?.build?.openclawVersion).toBeTruthy();
     expect(packageJson.files).toContain("dist/**");
     expect(packageJson.scripts?.prepack).toBe("npm run build");
+  });
+});
+
+describe("createConfigDeps", () => {
+  test("reads the current config and writes back only the Opik plugin entry", async () => {
+    const current = { gateway: { port: 1 }, plugins: { entries: {} } };
+    const draft: Record<string, any> = {
+      gateway: { port: 2 },
+      plugins: { allow: ["other"], entries: { other: { enabled: true } } },
+    };
+    const mutateConfigFile = vi.fn(async (params: { afterWrite?: unknown; mutate: (d: any) => void }) => {
+      params.mutate(draft);
+    });
+    const deps = createConfigDeps({ current: () => current, mutateConfigFile } as any);
+
+    expect(deps.loadConfig()).toBe(current);
+
+    const next = {
+      gateway: { port: 99 },
+      plugins: { allow: [], entries: { "opik-openclaw": { enabled: true }, other: { enabled: false } } },
+    };
+    await deps.writeConfigFile(next as any);
+
+    expect(mutateConfigFile).toHaveBeenCalledWith(
+      expect.objectContaining({ afterWrite: { mode: "auto" } }),
+    );
+    // Only the Opik entry changes; other plugins and the rest of the file stay as the host has them.
+    expect(draft).toEqual({
+      gateway: { port: 2 },
+      plugins: { allow: ["other"], entries: { other: { enabled: true }, "opik-openclaw": { enabled: true } } },
+    });
   });
 });

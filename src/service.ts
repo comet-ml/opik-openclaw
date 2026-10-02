@@ -3,13 +3,14 @@ import type {
   OpenClawPluginApi,
   OpenClawPluginService,
 } from "openclaw/plugin-sdk";
-import { onDiagnosticEvent } from "openclaw/plugin-sdk";
+import { onDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { Opik, Span, Trace } from "opik";
 import { createAttachmentUploader } from "./service/attachment-uploader.js";
 import { registerLlmHooks } from "./service/hooks/llm.js";
 import { registerSubagentHooks } from "./service/hooks/subagent.js";
 import { registerToolHooks } from "./service/hooks/tool.js";
 import {
+  AGENT_END_LLM_OUTPUT_GRACE_MS,
   ATTACHMENT_UPLOADS_ENABLED,
   DEFAULT_ATTACHMENT_BASE_URL,
   DEFAULT_FLUSH_RETRY_BASE_DELAY_MS,
@@ -140,11 +141,53 @@ export type OpikRuntimeService = OpenClawPluginService & {
   registerHooks: () => void;
 };
 
+type HookHandler = (...args: unknown[]) => unknown;
+type HookRouter = { owner: object | null; handlers: Map<string, HookHandler> };
+
+// OpenClaw 2026.9+ registers the plugin again for each agent turn (a "discovery"
+// registration with its own module instance) and dispatches typed hooks to that
+// registration, while services only start on the gateway's registration. Each
+// registration routes its hooks to the handlers of the one whose service started, so
+// they share its Opik client and trace state. globalThis is the only scope the two
+// module instances share.
+const HOOK_ROUTER_KEY = Symbol.for("opik-openclaw.hook-router");
+
+function getHookRouter(): HookRouter {
+  const scope = globalThis as unknown as Record<symbol, HookRouter | undefined>;
+  return (scope[HOOK_ROUTER_KEY] ??= { owner: null, handlers: new Map() });
+}
+
+export type OpikServiceOptions = {
+  /** How long agent_end waits for a late llm_output; 0 finalizes in a microtask. */
+  agentEndLlmOutputGraceMs?: number;
+};
+
 export function createOpikService(
   api: OpenClawPluginApi,
   pluginConfig: OpikPluginConfig = {},
+  options: OpikServiceOptions = {},
 ): OpikRuntimeService {
+  const agentEndLlmOutputGraceMs = options.agentEndLlmOutputGraceMs ?? AGENT_END_LLM_OUTPUT_GRACE_MS;
   let hooksRegistered = false;
+  const registrationId = {};
+  const ownHandlers = new Map<string, HookHandler>();
+  const hookApi = new Proxy(api, {
+    get(target, prop, receiver) {
+      if (prop !== "on") return Reflect.get(target, prop, receiver);
+      return (hookName: string, handler: HookHandler, ...rest: unknown[]) => {
+        ownHandlers.set(hookName, handler);
+        const routed: HookHandler = (...args) => {
+          const router = getHookRouter();
+          const ownerHandler =
+            router.owner && router.owner !== registrationId
+              ? router.handlers.get(hookName)
+              : undefined;
+          return (ownerHandler ?? handler)(...args);
+        };
+        return (target.on as (...a: unknown[]) => unknown).call(target, hookName, routed, ...rest);
+      };
+    },
+  });
 
   function rememberSessionCorrelation(sessionKey: string, agentId?: unknown): void {
     lastActiveSessionKey = sessionKey;
@@ -287,7 +330,9 @@ export function createOpikService(
     endChildSpans(active, reason);
     forgetSubagentSpanHostsByActive(active);
 
-    // Clear deferred finalization state so stale microtasks no-op.
+    // Clear deferred finalization state so stale microtasks and timers no-op.
+    clearTimeout(active.pendingFinalize);
+    active.pendingFinalize = undefined;
     active.agentEnd = undefined;
     active.output = undefined;
 
@@ -436,6 +481,8 @@ export function createOpikService(
   function finalizeTrace(sessionKey: string): void {
     const active = activeTraces.get(sessionKey);
     if (!active) return;
+    clearTimeout(active.pendingFinalize);
+    active.pendingFinalize = undefined;
 
     // End any remaining open child spans (LLM span if llm_output didn't fire).
     endChildSpans(active, `finalize sessionKey=${sessionKey}`);
@@ -510,7 +557,7 @@ export function createOpikService(
     hooksRegistered = true;
 
     registerLlmHooks({
-      api,
+      api: hookApi,
       getClient: () => client,
       activeTraces,
       getTags: () => currentTags,
@@ -525,10 +572,24 @@ export function createOpikService(
       warn: (message) => log.warn(message),
       formatError,
       resolveSessionKey,
+      finalizeEndedTurn: (sessionKey) => {
+        if (activeTraces.get(sessionKey)?.pendingFinalize) finalizeTrace(sessionKey);
+      },
+      finalizeAfterAgentEnd: (sessionKey) => {
+        const active = activeTraces.get(sessionKey);
+        if (!active?.pendingFinalize) return;
+        const traceRef = active.trace;
+        clearTimeout(active.pendingFinalize);
+        active.pendingFinalize = undefined;
+        queueMicrotask(() => {
+          const current = activeTraces.get(sessionKey);
+          if (current && current.trace === traceRef) finalizeTrace(sessionKey);
+        });
+      },
     });
 
     registerToolHooks({
-      api,
+      api: hookApi,
       getClient: () => client,
       activeTraces,
       sessionByAgentId,
@@ -546,7 +607,7 @@ export function createOpikService(
     });
 
     registerSubagentHooks({
-      api,
+      api: hookApi,
       getClient: () => client,
       rememberSessionCorrelation,
       resolveSubagentSpanContainer,
@@ -559,7 +620,7 @@ export function createOpikService(
       formatError,
     });
 
-    api.on("tool_result_persist", (event) => {
+    hookApi.on("tool_result_persist", (event) => {
       if (!toolResultPersistSanitizeEnabled) {
         return;
       }
@@ -578,7 +639,7 @@ export function createOpikService(
       }
     });
 
-    api.on("agent_end", (event, agentCtx) => {
+    hookApi.on("agent_end", (event, agentCtx) => {
       const agentCtxObj = agentCtx as Record<string, unknown>;
       const sessionKey = resolveSessionKey(agentCtxObj);
       if (!sessionKey) {
@@ -630,10 +691,18 @@ export function createOpikService(
       });
 
       const traceRef = active.trace;
-      queueMicrotask(() => {
+      const finalizeIfCurrent = () => {
         const current = activeTraces.get(sessionKey);
         if (current && current.trace === traceRef) finalizeTrace(sessionKey);
-      });
+      };
+      if (active.llmSpan && agentEndLlmOutputGraceMs > 0) {
+        // llm_output hasn't arrived yet; it lands after agent_end on OpenClaw 2026.9+.
+        clearTimeout(active.pendingFinalize);
+        active.pendingFinalize = setTimeout(finalizeIfCurrent, agentEndLlmOutputGraceMs);
+        active.pendingFinalize.unref?.();
+      } else {
+        queueMicrotask(finalizeIfCurrent);
+      }
     });
   }
 
@@ -782,12 +851,21 @@ export function createOpikService(
         }
       };
 
+      const router = getHookRouter();
+      router.owner = registrationId;
+      router.handlers = ownHandlers;
+
       log.info(
         `opik: exporting traces to project "${projectName}" (staleCleanup=${staleTraceCleanupEnabled ? "on" : "off"}, staleTimeoutMs=${staleTraceTimeoutMs}, staleSweepMs=${staleSweepIntervalMs}, flushRetryCount=${flushRetryCount}, flushRetryBaseDelayMs=${flushRetryBaseDelayMs})`,
       );
     },
 
     async stop() {
+      const router = getHookRouter();
+      if (router.owner === registrationId) {
+        router.owner = null;
+        router.handlers = new Map();
+      }
       cleanup?.();
       cleanup = null;
 

@@ -53,7 +53,7 @@ const diagnosticSubscriptionMode = vi.hoisted(() => ({
   value: "function" as "function" | "object",
 }));
 
-vi.mock("openclaw/plugin-sdk", () => ({
+vi.mock("openclaw/plugin-sdk/diagnostic-runtime", () => ({
   onDiagnosticEvent: (listener: (evt: unknown) => void) => {
     diagnosticListeners.push(listener);
     const unsubscribe = () => {
@@ -75,7 +75,15 @@ vi.mock("./service/attachment-uploader.js", () => ({
 // ---------------------------------------------------------------------------
 // SUT import (after mocks)
 // ---------------------------------------------------------------------------
-import { createOpikService } from "./service.js";
+import { createOpikService as createOpikServiceWithOptions } from "./service.js";
+
+// Most tests drive llm_input → agent_end in one tick and expect the old microtask finalize;
+// tests of the late-llm_output grace period pass their own options.
+const createOpikService = (
+  api: Parameters<typeof createOpikServiceWithOptions>[0],
+  cfg?: Parameters<typeof createOpikServiceWithOptions>[1],
+  options: Parameters<typeof createOpikServiceWithOptions>[2] = { agentEndLlmOutputGraceMs: 0 },
+) => createOpikServiceWithOptions(api, cfg, options);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -157,10 +165,51 @@ describe("opik service", () => {
     delete process.env.OPIK_URL_OVERRIDE;
     delete process.env.OPIK_PROJECT_NAME;
     delete process.env.OPIK_WORKSPACE;
+    // The hook router is process-wide; start every test without an owner from a previous one.
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("opik-openclaw.hook-router")];
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  // =========================================================================
+  // 0. Several registrations in one process (OpenClaw 2026.9+ registers the plugin
+  //    again per agent turn and dispatches hooks to that registration, while only
+  //    the gateway's registration has its service started)
+  // =========================================================================
+  describe("multiple registrations", () => {
+    test("hooks of a registration whose service never started export through the started one", async () => {
+      const gateway = createApi();
+      const turn = createApi();
+      const mockTrace = opikState.createMockTrace();
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const gatewayService = createOpikService(gateway.api as any);
+      gatewayService.registerHooks();
+      createOpikService(turn.api as any).registerHooks();
+      await gatewayService.start(createServiceContext() as any);
+
+      invokeHook(turn.hooks, "llm_input", { model: "m", provider: "p", prompt: "hi" }, agentCtx("s1"));
+
+      expect(mockTraceFn).toHaveBeenCalledTimes(1);
+      expect(mockTrace.span).toHaveBeenCalledWith(expect.objectContaining({ type: "llm" }));
+    });
+
+    test("after the started service stops, hooks of other registrations no-op", async () => {
+      const gateway = createApi();
+      const turn = createApi();
+
+      const gatewayService = createOpikService(gateway.api as any);
+      gatewayService.registerHooks();
+      createOpikService(turn.api as any).registerHooks();
+      await gatewayService.start(createServiceContext() as any);
+      await gatewayService.stop?.(createServiceContext() as any);
+
+      invokeHook(turn.hooks, "llm_input", { model: "m", provider: "p", prompt: "hi" }, agentCtx("s1"));
+
+      expect(mockTraceFn).not.toHaveBeenCalled();
+    });
   });
 
   // =========================================================================
@@ -312,12 +361,12 @@ describe("opik service", () => {
       const service = createOpikService(api as any);
       await service.start(createServiceContext() as any);
 
-      expect(api.on).toHaveBeenCalledTimes(10);
+      expect(api.on).toHaveBeenCalledTimes(9);
       expect(api.on).toHaveBeenCalledWith("llm_input", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("llm_output", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("before_tool_call", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("after_tool_call", expect.any(Function));
-      expect(api.on).toHaveBeenCalledWith("subagent_spawning", expect.any(Function));
+      expect(api.on).not.toHaveBeenCalledWith("subagent_spawning", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_delivery_target", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_spawned", expect.any(Function));
       expect(api.on).toHaveBeenCalledWith("subagent_ended", expect.any(Function));
@@ -566,6 +615,27 @@ describe("opik service", () => {
           provider: "openai",
         }),
       );
+    });
+
+    test.each([
+      ["google", "google_ai"],
+      ["google-vertex", "google_vertexai"],
+    ])("normalizes OpenClaw provider %s to Opik's %s so Gemini spans get a cost", async (from, to) => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(
+        hooks,
+        "llm_input",
+        { model: "gemini-2.5-flash", provider: from, prompt: "Hello", historyMessages: [] },
+        agentCtx("session-1"),
+      );
+
+      expect(mockTrace.span).toHaveBeenCalledWith(expect.objectContaining({ provider: to }));
     });
 
     test("sanitizes media image references in llm_input payloads", async () => {
@@ -1383,7 +1453,7 @@ describe("opik service", () => {
       );
       invokeHook(
         hooks,
-        "subagent_spawning",
+        "subagent_spawned",
         {
           childSessionKey: "child-session",
           agentId: "writer",
@@ -1534,7 +1604,7 @@ describe("opik service", () => {
 
       invokeHook(
         hooks,
-        "subagent_spawning",
+        "subagent_spawned",
         {
           childSessionKey: "child-session",
           agentId: "writer",
@@ -1616,7 +1686,7 @@ describe("opik service", () => {
 
       invokeHook(
         hooks,
-        "subagent_spawning",
+        "subagent_spawned",
         {
           childSessionKey: "child-session",
           agentId: "writer",
@@ -1686,7 +1756,7 @@ describe("opik service", () => {
       );
       invokeHook(
         hooks,
-        "subagent_spawning",
+        "subagent_spawned",
         {
           childSessionKey: "child-session",
           agentId: "writer",
@@ -1703,7 +1773,7 @@ describe("opik service", () => {
 
       invokeHook(
         hooks,
-        "subagent_spawning",
+        "subagent_spawned",
         {
           childSessionKey: "grandchild-session",
           agentId: "reviewer",
@@ -2191,6 +2261,103 @@ describe("opik service", () => {
       );
       expect(mockTrace.end).toHaveBeenCalledTimes(1);
       await vi.waitFor(() => expect(mockFlush).toHaveBeenCalledTimes(1));
+    });
+
+    test("llm_output arriving after agent_end in a later tick still lands on the LLM span and trace", async () => {
+      // OpenClaw 2026.9 dispatches agent_end, then llm_output, asynchronously.
+      vi.useFakeTimers();
+      try {
+        const { api, hooks } = createApi();
+        const mockLlmSpan = opikState.createMockSpan();
+        const mockTrace = opikState.createMockTrace();
+        mockTrace.span.mockReturnValue(mockLlmSpan);
+        mockTraceFn.mockReturnValue(mockTrace);
+
+        const service = createOpikService(api as any, undefined, { agentEndLlmOutputGraceMs: 1000 });
+        await service.start(createServiceContext() as any);
+
+        invokeHook(hooks, "llm_input", { model: "gpt-4", provider: "openai", prompt: "hi" }, agentCtx("s1"));
+        invokeHook(hooks, "agent_end", { success: true, durationMs: 300, messages: [] }, agentCtx("s1"));
+        await vi.advanceTimersByTimeAsync(1);
+
+        invokeHook(
+          hooks,
+          "llm_output",
+          {
+            model: "gpt-4",
+            provider: "openai",
+            assistantTexts: ["Hi there!"],
+            usage: { input: 10, output: 5, total: 15 },
+          },
+          agentCtx("s1"),
+        );
+        await vi.advanceTimersByTimeAsync(1);
+
+        expect(mockLlmSpan.update).toHaveBeenCalledWith(
+          expect.objectContaining({ output: expect.objectContaining({ assistantTexts: ["Hi there!"] }) }),
+        );
+        expect(mockTrace.update).toHaveBeenCalledWith(
+          expect.objectContaining({ output: expect.objectContaining({ output: "Hi there!" }) }),
+        );
+        expect(mockTrace.end).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    test("a new turn starting inside the grace window gets its own trace and the previous one is finalized", async () => {
+      vi.useFakeTimers();
+      try {
+        const { api, hooks } = createApi();
+        const firstTrace = opikState.createMockTrace();
+        const secondTrace = opikState.createMockTrace();
+        const secondLlmSpan = opikState.createMockSpan();
+        firstTrace.span.mockReturnValue(opikState.createMockSpan());
+        secondTrace.span.mockReturnValue(secondLlmSpan);
+        mockTraceFn.mockReturnValueOnce(firstTrace).mockReturnValueOnce(secondTrace);
+
+        const service = createOpikService(api as any, undefined, { agentEndLlmOutputGraceMs: 1000 });
+        await service.start(createServiceContext() as any);
+
+        invokeHook(hooks, "llm_input", { model: "gpt-4", provider: "openai", prompt: "one" }, agentCtx("s1"));
+        invokeHook(hooks, "agent_end", { success: true, durationMs: 100, messages: [] }, agentCtx("s1"));
+        await vi.advanceTimersByTimeAsync(10);
+
+        invokeHook(hooks, "llm_input", { model: "gpt-4", provider: "openai", prompt: "two" }, agentCtx("s1"));
+        await vi.advanceTimersByTimeAsync(1);
+
+        expect(firstTrace.end).toHaveBeenCalledTimes(1);
+        expect(mockTraceFn).toHaveBeenCalledTimes(2);
+
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(secondTrace.end).not.toHaveBeenCalled();
+        expect(secondLlmSpan.end).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    test("when llm_output never arrives after agent_end, the trace is finalized after the grace period", async () => {
+      vi.useFakeTimers();
+      try {
+        const { api, hooks } = createApi();
+        const mockTrace = opikState.createMockTrace();
+        mockTrace.span.mockReturnValue(opikState.createMockSpan());
+        mockTraceFn.mockReturnValue(mockTrace);
+
+        const service = createOpikService(api as any, undefined, { agentEndLlmOutputGraceMs: 1000 });
+        await service.start(createServiceContext() as any);
+
+        invokeHook(hooks, "llm_input", { model: "gpt-4", provider: "openai", prompt: "hi" }, agentCtx("s1"));
+        invokeHook(hooks, "agent_end", { success: true, durationMs: 300, messages: [] }, agentCtx("s1"));
+
+        await vi.advanceTimersByTimeAsync(999);
+        expect(mockTrace.end).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(mockTrace.end).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     test("agent_end without llm_output extracts output from messages", async () => {

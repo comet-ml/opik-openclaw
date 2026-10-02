@@ -35,57 +35,7 @@ type SubagentHooksDeps = {
 };
 
 export function registerSubagentHooks(deps: SubagentHooksDeps): void {
-  deps.api.on("subagent_spawning", (event, subagentCtx) => {
-    if (!deps.getClient()) return;
-
-    const eventObj = event as Record<string, unknown>;
-    const ctxObj = subagentCtx as Record<string, unknown>;
-
-    const requesterSessionKey = asNonEmptyString(ctxObj.requesterSessionKey);
-    const childSessionKey =
-      asNonEmptyString(eventObj.childSessionKey) ?? asNonEmptyString(ctxObj.childSessionKey);
-    if (!childSessionKey) return;
-
-    const existingHost = deps.getSubagentSpanHost(childSessionKey);
-    if (existingHost) {
-      deps.safeSpanEnd(existingHost.span, `subagent reset childSessionKey=${childSessionKey}`);
-      existingHost.active.subagentSpans.delete(childSessionKey);
-      deps.forgetSubagentSpanHost(childSessionKey);
-    }
-
-    const host = deps.resolveSubagentSpanContainer({ requesterSessionKey, childSessionKey });
-    if (!host) return;
-
-    deps.rememberSessionCorrelation(host.sessionKey);
-    host.active.lastActivityAt = Date.now();
-
-    try {
-      const span = host.parent.span({
-        name: `subagent:${asNonEmptyString(eventObj.agentId) ?? "unknown"}`,
-        input: {
-          childSessionKey,
-          agentId: eventObj.agentId,
-          label: eventObj.label,
-          mode: eventObj.mode,
-          requester: eventObj.requester,
-          threadRequested: eventObj.threadRequested,
-        },
-        metadata: {
-          status: "spawning",
-          requesterSessionKey,
-          childSessionKey,
-          runId: asNonEmptyString(ctxObj.runId),
-        },
-      });
-      host.active.subagentSpans.set(childSessionKey, span);
-      deps.rememberSubagentSpanHost(childSessionKey, host.sessionKey, host.active, span);
-    } catch (err) {
-      deps.warn(
-        `opik: subagent span creation failed (childSessionKey=${childSessionKey}): ${deps.formatError(err)}`,
-      );
-    }
-  });
-
+  // OpenClaw removed subagent_spawning in August 2026; subagent_spawned is the only spawn hook.
   deps.api.on("subagent_spawned", (event, subagentCtx) => {
     if (!deps.getClient()) return;
 
@@ -114,7 +64,10 @@ export function registerSubagentHooks(deps: SubagentHooksDeps): void {
           input: {
             childSessionKey,
             agentId: eventObj.agentId,
+            label: eventObj.label,
             mode: eventObj.mode,
+            requester: eventObj.requester,
+            threadRequested: eventObj.threadRequested,
           },
         });
         host.active.subagentSpans.set(childSessionKey, span);
