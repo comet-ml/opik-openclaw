@@ -2337,6 +2337,63 @@ describe("opik service", () => {
       }
     });
 
+    test("stopping during the grace window still writes the finished turn's output to the trace", async () => {
+      const { api, hooks } = createApi();
+      const mockTrace = opikState.createMockTrace();
+      mockTrace.span.mockReturnValue(opikState.createMockSpan());
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any, undefined, { agentEndLlmOutputGraceMs: 1000 });
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "gpt-4", provider: "openai", prompt: "hi" }, agentCtx("s1"));
+      invokeHook(
+        hooks,
+        "agent_end",
+        { success: true, durationMs: 300, messages: [{ role: "assistant", content: "Hi there!" }] },
+        agentCtx("s1"),
+      );
+      await service.stop?.({} as any);
+
+      expect(mockTrace.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          output: expect.objectContaining({ lastAssistant: { role: "assistant", content: "Hi there!" } }),
+          metadata: expect.objectContaining({ success: true, durationMs: 300 }),
+        }),
+      );
+      expect(mockTrace.end).toHaveBeenCalledTimes(1);
+    });
+
+    test("a new turn right after a late llm_output gets its own trace", async () => {
+      const { api, hooks } = createApi();
+      const firstTrace = opikState.createMockTrace();
+      const secondTrace = opikState.createMockTrace();
+      firstTrace.span.mockReturnValue(opikState.createMockSpan());
+      secondTrace.span.mockReturnValue(opikState.createMockSpan());
+      mockTraceFn.mockReturnValueOnce(firstTrace).mockReturnValueOnce(secondTrace);
+
+      const service = createOpikService(api as any, undefined, { agentEndLlmOutputGraceMs: 1000 });
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "gpt-4", provider: "openai", prompt: "one" }, agentCtx("s1"));
+      invokeHook(hooks, "agent_end", { success: true, durationMs: 100, messages: [] }, agentCtx("s1"));
+      await Promise.resolve();
+      invokeHook(
+        hooks,
+        "llm_output",
+        { model: "gpt-4", provider: "openai", assistantTexts: ["one done"] },
+        agentCtx("s1"),
+      );
+      // Same tick: the next turn starts before any microtask runs.
+      invokeHook(hooks, "llm_input", { model: "gpt-4", provider: "openai", prompt: "two" }, agentCtx("s1"));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(firstTrace.end).toHaveBeenCalledTimes(1);
+      expect(mockTraceFn).toHaveBeenCalledTimes(2);
+      expect(secondTrace.end).not.toHaveBeenCalled();
+    });
+
     test("when llm_output never arrives after agent_end, the trace is finalized after the grace period", async () => {
       vi.useFakeTimers();
       try {

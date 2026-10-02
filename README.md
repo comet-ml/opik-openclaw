@@ -186,7 +186,7 @@ No OpenClaw core changes are included in this repository and relies on native ho
 
 Prerequisites:
 
-- Node.js `>=22.12.0`
+- Node.js `>=24.16`
 - npm `>=10`
 
 ```bash

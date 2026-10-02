@@ -573,18 +573,12 @@ export function createOpikService(
       formatError,
       resolveSessionKey,
       finalizeEndedTurn: (sessionKey) => {
-        if (activeTraces.get(sessionKey)?.pendingFinalize) finalizeTrace(sessionKey);
+        const active = activeTraces.get(sessionKey);
+        if (active?.pendingFinalize || active?.agentEnd) finalizeTrace(sessionKey);
       },
       finalizeAfterAgentEnd: (sessionKey) => {
-        const active = activeTraces.get(sessionKey);
-        if (!active?.pendingFinalize) return;
-        const traceRef = active.trace;
-        clearTimeout(active.pendingFinalize);
-        active.pendingFinalize = undefined;
-        queueMicrotask(() => {
-          const current = activeTraces.get(sessionKey);
-          if (current && current.trace === traceRef) finalizeTrace(sessionKey);
-        });
+        // Synchronously: a next turn's llm_input may follow in the same tick.
+        if (activeTraces.get(sessionKey)?.pendingFinalize) finalizeTrace(sessionKey);
       },
     });
 
@@ -657,6 +651,7 @@ export function createOpikService(
       }
 
       applyContextMeta(active, agentCtx as Record<string, unknown>);
+      active.lastActivityAt = Date.now();
       for (const [toolKey, toolSpan] of active.toolSpans) {
         safeSpanEnd(toolSpan, `agent_end orphan tool sessionKey=${sessionKey} toolKey=${toolKey}`);
       }
@@ -869,9 +864,14 @@ export function createOpikService(
       cleanup?.();
       cleanup = null;
 
-      // End all open traces before flushing.
-      for (const [sessionKey, active] of activeTraces) {
-        closeActiveTrace(active, `service stop sessionKey=${sessionKey}`);
+      // End all open traces before flushing. A turn that already reached agent_end (waiting
+      // for a late llm_output) is finalized with its output and metadata instead of just closed.
+      for (const [sessionKey, active] of [...activeTraces]) {
+        if (active.agentEnd) {
+          finalizeTrace(sessionKey);
+        } else {
+          closeActiveTrace(active, `service stop sessionKey=${sessionKey}`);
+        }
       }
       activeTraces.clear();
       sessionByAgentId.clear();
