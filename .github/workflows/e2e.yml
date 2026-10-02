@@ -67,7 +67,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "22.x"
+          # OpenClaw 2026.9+ requires Node >=24.16; the job always tests the latest release.
+          node-version: "24.x"
           cache: "npm"
 
       - name: Setup npm
@@ -108,7 +109,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
 
       - name: Install plugin dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -184,7 +185,9 @@ jobs:
           EOF
 
       - name: Install plugin from tarball
-        run: openclaw plugins install ./opik-opik-openclaw-*.tgz
+        # OpenClaw 2026.9+ refuses local archives outside ClawHub without --force and asks for
+        # capability consent; this is the tarball we just built.
+        run: openclaw plugins install --force --accept-capabilities ./opik-opik-openclaw-*.tgz
 
       - name: Start mock Opik server
         run: |

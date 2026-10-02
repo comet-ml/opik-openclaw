@@ -9,7 +9,7 @@ import {
   resolveChannelId,
   resolveTrigger,
 } from "../helpers.js";
-import { sanitizeValueForOpik } from "../payload-sanitizer.js";
+import { sanitizeStringForOpik, sanitizeValueForOpik } from "../payload-sanitizer.js";
 
 type LlmHooksDeps = {
   api: OpenClawPluginApi;
@@ -33,6 +33,10 @@ type LlmHooksDeps = {
   }) => void;
   warn: (message: string) => void;
   formatError: (err: unknown) => string;
+  /** Finalizes the trace now if agent_end already came and was waiting for this llm_output. */
+  finalizeAfterAgentEnd: (sessionKey: string) => void;
+  /** Finalizes the session's trace if its turn already ended (agent_end seen), before a new turn. */
+  finalizeEndedTurn: (sessionKey: string) => void;
 };
 
 export function registerLlmHooks(deps: LlmHooksDeps): void {
@@ -45,6 +49,9 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
       deps.warn("opik: llm_input missing sessionKey");
       return;
     }
+    // A turn whose agent_end already arrived is over; this llm_input starts a new trace. Finalize
+    // first: finalizing forgets the session's correlation, which the new turn records next.
+    deps.finalizeEndedTurn(sessionKey);
     deps.rememberSessionCorrelation(sessionKey, agentCtx.agentId);
     const normalizedProvider = normalizeProvider(event.provider) ?? event.provider;
     const channelId = resolveChannelId(agentCtxObj);
@@ -178,6 +185,19 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
       ? sanitizedLlmOutput.assistantTexts.filter((item): item is string => typeof item === "string")
       : [];
 
+    // A failed provider call (e.g. HTTP 401) can come back as a normal llm_output whose last
+    // assistant message has stopReason "error"; OpenClaw's agent_end may still say success.
+    const lastAssistant = event.lastAssistant as { stopReason?: unknown; errorMessage?: unknown } | undefined;
+    const llmError =
+      lastAssistant?.stopReason === "error"
+        ? sanitizeStringForOpik(
+            typeof lastAssistant.errorMessage === "string" && lastAssistant.errorMessage.trim()
+              ? lastAssistant.errorMessage
+              : "LLM call failed",
+          )
+        : undefined;
+    if (llmError) active.llmError = llmError;
+
     deps.safeSpanUpdate(
       active.llmSpan,
       {
@@ -185,6 +205,9 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
         usage: mapUsageToOpikTokens(event.usage),
         model: event.model,
         provider: normalizedProvider,
+        ...(llmError
+          ? { errorInfo: { exceptionType: "LlmError", message: llmError, traceback: llmError } }
+          : {}),
       },
       `llm_output sessionKey=${sessionKey}`,
     );
@@ -202,5 +225,6 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
 
     deps.safeSpanEnd(active.llmSpan, `llm_output sessionKey=${sessionKey}`);
     active.llmSpan = null;
+    deps.finalizeAfterAgentEnd(sessionKey);
   });
 }

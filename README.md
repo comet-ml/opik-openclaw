@@ -43,8 +43,8 @@ The plugin runs inside the OpenClaw Gateway process. If your gateway is remote, 
 
 Prerequisites:
 
-- OpenClaw `>=2026.3.2`
-- Node.js `>=22.12.0`
+- OpenClaw `>=2026.9.7` (for older OpenClaw, stay on plugin `0.2.17`)
+- Node.js `>=24.16` (required by OpenClaw 2026.9)
 - npm `>=10`
 
 ### 1. Install the plugin in OpenClaw
@@ -174,8 +174,7 @@ image refs in persisted tool transcript messages via `tool_result_persist`.
 | `llm_output` | llm span update/end | writes usage/output and closes span |
 | `before_tool_call` | tool span start | captures tool name + input |
 | `after_tool_call` | tool span update/end | captures output/error + duration |
-| `subagent_spawning` | subagent span start | starts subagent lifecycle span on requester trace |
-| `subagent_spawned` | subagent span update | enriches subagent span with run metadata |
+| `subagent_spawned` | subagent span start | starts the subagent lifecycle span on the requester trace with run metadata |
 | `subagent_ended` | subagent span update/end | finalizes subagent span with outcome/error |
 | `agent_end` | trace finalize | closes pending spans and trace |
 
@@ -187,7 +186,7 @@ No OpenClaw core changes are included in this repository and relies on native ho
 
 Prerequisites:
 
-- Node.js `>=22.12.0`
+- Node.js `>=24.16`
 - npm `>=10`
 
 ```bash

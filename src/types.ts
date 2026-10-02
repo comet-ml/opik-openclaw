@@ -98,6 +98,13 @@ export type ActiveTrace = {
     cacheWrite?: number;
     total?: number;
   };
+  /**
+   * Set when agent_end arrived while the LLM span was still open: finalization waits for
+   * llm_output (OpenClaw 2026.9 dispatches it after agent_end) or for this timer.
+   */
+  pendingFinalize?: ReturnType<typeof setTimeout>;
+  /** Provider error from llm_output (lastAssistant.stopReason "error"), which agent_end may not report. */
+  llmError?: string;
   /** Last known model name from hooks or diagnostics. */
   model?: string;
   /** Last known provider from hooks or diagnostics. */

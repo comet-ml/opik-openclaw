@@ -62,6 +62,11 @@ export function normalizeProvider(value: unknown): string | undefined {
     return "openai";
   }
 
+  // OpenClaw's provider ids for Gemini differ from the canonical names in Opik's price table,
+  // so without this mapping Gemini spans get no cost.
+  if (normalized === "google") return "google_ai";
+  if (normalized === "google-vertex") return "google_vertexai";
+
   return normalized;
 }
 
