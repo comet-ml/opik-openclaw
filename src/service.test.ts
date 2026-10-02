@@ -2364,6 +2364,34 @@ describe("opik service", () => {
       expect(mockTrace.end).toHaveBeenCalledTimes(1);
     });
 
+    test("after a turn rolls over, hooks that only carry agentId still find the new turn", async () => {
+      const { api, hooks } = createApi();
+      const firstTrace = opikState.createMockTrace();
+      const secondTrace = opikState.createMockTrace();
+      const secondLlmSpan = opikState.createMockSpan();
+      firstTrace.span.mockReturnValue(opikState.createMockSpan());
+      secondTrace.span.mockReturnValue(secondLlmSpan);
+      mockTraceFn.mockReturnValueOnce(firstTrace).mockReturnValueOnce(secondTrace);
+
+      const service = createOpikService(api as any, undefined, { agentEndLlmOutputGraceMs: 1000 });
+      await service.start(createServiceContext() as any);
+
+      const ctx = { sessionKey: "s1", agentId: "a1" };
+      invokeHook(hooks, "llm_input", { model: "gpt-4", provider: "openai", prompt: "one" }, ctx);
+      invokeHook(hooks, "agent_end", { success: true, durationMs: 100, messages: [] }, ctx);
+      invokeHook(hooks, "llm_input", { model: "gpt-4", provider: "openai", prompt: "two" }, ctx);
+      invokeHook(
+        hooks,
+        "llm_output",
+        { model: "gpt-4", provider: "openai", assistantTexts: ["two done"] },
+        { agentId: "a1" },
+      );
+
+      expect(secondLlmSpan.update).toHaveBeenCalledWith(
+        expect.objectContaining({ output: expect.objectContaining({ assistantTexts: ["two done"] }) }),
+      );
+    });
+
     test("a new turn right after a late llm_output gets its own trace", async () => {
       const { api, hooks } = createApi();
       const firstTrace = opikState.createMockTrace();

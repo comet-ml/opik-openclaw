@@ -49,6 +49,9 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
       deps.warn("opik: llm_input missing sessionKey");
       return;
     }
+    // A turn whose agent_end already arrived is over; this llm_input starts a new trace. Finalize
+    // first: finalizing forgets the session's correlation, which the new turn records next.
+    deps.finalizeEndedTurn(sessionKey);
     deps.rememberSessionCorrelation(sessionKey, agentCtx.agentId);
     const normalizedProvider = normalizeProvider(event.provider) ?? event.provider;
     const channelId = resolveChannelId(agentCtxObj);
@@ -61,8 +64,6 @@ export function registerLlmHooks(deps: LlmHooksDeps): void {
       imagesCount: event.imagesCount,
     }) as Record<string, unknown>;
 
-    // A turn whose agent_end already arrived is over; this llm_input starts a new trace.
-    deps.finalizeEndedTurn(sessionKey);
     const existing = deps.activeTraces.get(sessionKey);
     let trace: Trace;
     if (existing) {
