@@ -499,10 +499,11 @@ export function createOpikService(
     }
 
     const agentEnd = active.agentEnd;
+    const traceError = agentEnd?.error ?? active.llmError;
     const metadata: Record<string, unknown> = {
       created_from: OPIK_CREATED_FROM,
       ...active.costMeta,
-      success: agentEnd?.success,
+      success: active.llmError ? false : agentEnd?.success,
       durationMs: agentEnd?.durationMs,
       model: active.model ?? active.costMeta.model,
       provider: active.provider ?? active.costMeta.provider,
@@ -523,19 +524,19 @@ export function createOpikService(
       };
     }
 
-    if (agentEnd?.error) metadata.error = agentEnd.error;
+    if (traceError) metadata.error = traceError;
 
     safeTraceUpdate(
       active.trace,
       {
         ...(output ? { output } : {}),
         metadata,
-        ...(agentEnd?.error
+        ...(traceError
           ? {
               errorInfo: {
-                exceptionType: "AgentError",
-                message: agentEnd.error,
-                traceback: agentEnd.error,
+                exceptionType: agentEnd?.error ? "AgentError" : "LlmError",
+                message: traceError,
+                traceback: traceError,
               },
             }
           : {}),

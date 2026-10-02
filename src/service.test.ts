@@ -2445,6 +2445,46 @@ describe("opik service", () => {
       }
     });
 
+    test("a provider error reported only in llm_output marks the LLM span and the trace as failed", async () => {
+      // OpenClaw 2026.9 reports a failed provider call (e.g. HTTP 401) as agent_end success=true
+      // with no error; the failure is only in llm_output's lastAssistant.
+      const { api, hooks } = createApi();
+      const mockLlmSpan = opikState.createMockSpan();
+      const mockTrace = opikState.createMockTrace();
+      mockTrace.span.mockReturnValue(mockLlmSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "gpt-5.4-mini", provider: "openai", prompt: "hi" }, agentCtx("s1"));
+      invokeHook(
+        hooks,
+        "llm_output",
+        {
+          model: "gpt-5.4-mini",
+          provider: "openai",
+          assistantTexts: [],
+          lastAssistant: { role: "assistant", content: [], stopReason: "error", errorMessage: "401 Incorrect API key provided" },
+        },
+        agentCtx("s1"),
+      );
+      invokeHook(hooks, "agent_end", { success: true, durationMs: 400, messages: [] }, agentCtx("s1"));
+      await Promise.resolve();
+
+      expect(mockLlmSpan.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errorInfo: expect.objectContaining({ message: "401 Incorrect API key provided" }),
+        }),
+      );
+      expect(mockTrace.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({ success: false, error: "401 Incorrect API key provided" }),
+          errorInfo: expect.objectContaining({ message: "401 Incorrect API key provided" }),
+        }),
+      );
+    });
+
     test("agent_end without llm_output extracts output from messages", async () => {
       const { api, hooks } = createApi();
       const mockLlmSpan = opikState.createMockSpan();
