@@ -32,8 +32,10 @@ export type SessionFallbackMode = "agentId" | "single active trace" | "last acti
 
 type SessionSpanContainer = { sessionKey: string; active: ActiveTrace; parent: Trace | Span };
 
-// Bounds the skipped-call set if after_tool_call never arrives for some of them.
+// Bounds the skipped-call record if after_tool_call never arrives for some of them, and drops
+// entries old enough that a matching after_tool_call would be a different, reused call id.
 const MAX_SKIPPED_TOOL_CALLS = 500;
+const SKIPPED_TOOL_CALL_TTL_MS = 5 * 60 * 1000;
 
 /**
  * Finds the session a tool call belongs to when OpenClaw leaves `sessionKey` out of the hook
@@ -97,7 +99,15 @@ function createToolSpan(
 export function registerToolHooks(deps: ToolHooksDeps): void {
   // toolCallIds whose before_tool_call couldn't be tied to a session; after_tool_call backfills
   // spans for these and only these, so an unmatched call never produces a duplicate span.
-  const skippedToolCallIds = new Set<string>();
+  const skippedToolCallIds = new Map<string, number>();
+  const pruneSkippedToolCalls = (now: number) => {
+    for (const [id, skippedAt] of skippedToolCallIds) {
+      if (now - skippedAt <= SKIPPED_TOOL_CALL_TTL_MS && skippedToolCallIds.size < MAX_SKIPPED_TOOL_CALLS) {
+        break;
+      }
+      skippedToolCallIds.delete(id);
+    }
+  };
 
   deps.api.on("before_tool_call", (event, toolCtx) => {
     if (!deps.getClient()) return;
@@ -109,10 +119,10 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
     const { sessionKey } = resolveToolSessionKey(deps, toolCtx, { allowLastActive: false });
     if (!sessionKey) {
       if (toolCallId) {
-        if (skippedToolCallIds.size >= MAX_SKIPPED_TOOL_CALLS) {
-          skippedToolCallIds.delete(skippedToolCallIds.values().next().value as string);
-        }
-        skippedToolCallIds.add(toolCallId);
+        const now = Date.now();
+        pruneSkippedToolCalls(now);
+        skippedToolCallIds.delete(toolCallId);
+        skippedToolCallIds.set(toolCallId, now);
       }
       return;
     }
@@ -207,8 +217,15 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
         }
       }
     }
-    const isBackfill = !matchedSpan && !!toolCallId && skippedToolCallIds.has(toolCallId);
+    // Backfill only a call before_tool_call skipped recently, and only into a session this hook can
+    // identify for sure: guessing from recent activity could put the span into another trace.
+    const skippedAt = toolCallId ? skippedToolCallIds.get(toolCallId) : undefined;
     if (toolCallId) skippedToolCallIds.delete(toolCallId);
+    const isBackfill =
+      !matchedSpan &&
+      skippedAt !== undefined &&
+      Date.now() - skippedAt <= SKIPPED_TOOL_CALL_TTL_MS &&
+      fallbackMode !== "last active session";
     if (isBackfill) {
       // before_tool_call had no usable session context (bundle-MCP tools) and we couldn't guess
       // it safely. Create the span now, in the session this call reports, back-dated by its duration.

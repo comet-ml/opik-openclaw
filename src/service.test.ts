@@ -1148,6 +1148,75 @@ describe("opik service", () => {
         vi.useRealTimers();
       }
     });
+
+    test("does not backfill a skipped call whose after_tool_call arrives after the skip expired", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-01T12:00:00.000Z"));
+      try {
+        const { api, hooks } = createApi();
+        const traceS1 = opikState.createMockTrace();
+        const traceS2 = opikState.createMockTrace();
+        const llmS2 = opikState.createMockSpan();
+        traceS1.span.mockReturnValueOnce(opikState.createMockSpan());
+        traceS2.span.mockReturnValueOnce(llmS2);
+        mockTraceFn.mockReturnValueOnce(traceS1).mockReturnValueOnce(traceS2);
+
+        const service = createOpikService(api as any);
+        await service.start(createServiceContext() as any);
+
+        invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1", { agentId: "a1" }));
+        invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s2", { agentId: "a2" }));
+        invokeHook(
+          hooks,
+          "before_tool_call",
+          { toolName: MCP_TOOL, params: {} },
+          { toolName: MCP_TOOL, toolCallId: MCP_CALL_ID },
+        );
+        vi.setSystemTime(new Date("2026-10-01T12:10:00.000Z"));
+        invokeHook(
+          hooks,
+          "after_tool_call",
+          { toolName: MCP_TOOL, params: {}, result: "ok" },
+          toolCtx("s2", { agentId: "a2", toolName: MCP_TOOL, toolCallId: MCP_CALL_ID }),
+        );
+
+        expect(llmS2.span).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    test("does not backfill when after_tool_call can only guess the session from recent activity", async () => {
+      const { api, hooks } = createApi();
+      const traceS1 = opikState.createMockTrace();
+      const traceS2 = opikState.createMockTrace();
+      const llmS1 = opikState.createMockSpan();
+      const llmS2 = opikState.createMockSpan();
+      traceS1.span.mockReturnValueOnce(llmS1);
+      traceS2.span.mockReturnValueOnce(llmS2);
+      mockTraceFn.mockReturnValueOnce(traceS1).mockReturnValueOnce(traceS2);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1", { agentId: "a1" }));
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s2", { agentId: "a2" }));
+      invokeHook(
+        hooks,
+        "before_tool_call",
+        { toolName: MCP_TOOL, params: {} },
+        { toolName: MCP_TOOL, toolCallId: MCP_CALL_ID },
+      );
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        { toolName: MCP_TOOL, params: {}, result: "ok" },
+        { toolName: MCP_TOOL, toolCallId: MCP_CALL_ID },
+      );
+
+      expect(llmS1.span).not.toHaveBeenCalled();
+      expect(llmS2.span).not.toHaveBeenCalled();
+    });
   });
 
   // =========================================================================
