@@ -11,3 +11,5 @@ export const ATTACHMENT_UPLOAD_PART_SIZE_BYTES = 8 * 1024 * 1024;
 export const DEFAULT_ATTACHMENT_BASE_URL = "https://www.comet.com/opik/api";
 export const DEFAULT_UPLOADED_ATTACHMENT_CACHE_MAX_KEYS = 2048;
 export const ATTACHMENT_UPLOADS_ENABLED = true;
+/** How long agent_end waits for a late llm_output before finalizing the trace without it. */
+export const AGENT_END_LLM_OUTPUT_GRACE_MS = 1000;
