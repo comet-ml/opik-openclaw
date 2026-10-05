@@ -210,6 +210,34 @@ describe("opik service", () => {
 
       expect(mockTraceFn).not.toHaveBeenCalled();
     });
+
+    test("a reload that starts the new service before stopping the old keeps hooks on the new one", async () => {
+      // On reload OpenClaw loads the plugin into a fresh module instance, so each service gets
+      // its own client and trace state; only the router on globalThis is shared.
+      const loadFreshModule = async () => {
+        vi.resetModules();
+        return (await import("./service.js")).createOpikService;
+      };
+      const oldGateway = createApi();
+      const newGateway = createApi();
+      const turn = createApi();
+      mockTraceFn.mockReturnValue(opikState.createMockTrace());
+
+      const oldService = (await loadFreshModule())(oldGateway.api as any);
+      oldService.registerHooks();
+      const newService = (await loadFreshModule())(newGateway.api as any);
+      newService.registerHooks();
+      (await loadFreshModule())(turn.api as any).registerHooks();
+      await oldService.start(createServiceContext() as any);
+      await newService.start(createServiceContext() as any);
+      // The old service no longer owns the router, so its stop must leave the router alone.
+      await oldService.stop?.(createServiceContext() as any);
+
+      invokeHook(turn.hooks, "llm_input", { model: "m", provider: "p", prompt: "hi" }, agentCtx("s1"));
+
+      expect(mockTraceFn).toHaveBeenCalledTimes(1);
+      await newService.stop?.(createServiceContext() as any);
+    });
   });
 
   // =========================================================================

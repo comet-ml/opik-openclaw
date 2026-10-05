@@ -150,6 +150,12 @@ type HookRouter = { owner: object | null; handlers: Map<string, HookHandler> };
 // registration routes its hooks to the handlers of the one whose service started, so
 // they share its Opik client and trace state. globalThis is the only scope the two
 // module instances share.
+//
+// The router assumes OpenClaw delivers each hook event to exactly one registration of a
+// plugin, so the started registration never sees an event twice. On 2026.9.7 that holds by
+// construction: the hook runner merges registries per pluginId + hookName, letting the
+// overlay (per-turn) registration's hook replace the base one rather than run beside it, and
+// it skips retired registries. A host change there would show up as duplicate spans or traces.
 const HOOK_ROUTER_KEY = Symbol.for("opik-openclaw.hook-router");
 
 function getHookRouter(): HookRouter {
@@ -175,6 +181,11 @@ export function createOpikService(
     get(target, prop, receiver) {
       if (prop !== "on") return Reflect.get(target, prop, receiver);
       return (hookName: string, handler: HookHandler, ...rest: unknown[]) => {
+        // Routing looks handlers up by hook name, so a second handler for the same name would
+        // replace the first in the started registration and be lost for routed events.
+        if (ownHandlers.has(hookName)) {
+          throw new Error(`opik: hook "${hookName}" is registered twice; merge the handlers`);
+        }
         ownHandlers.set(hookName, handler);
         const routed: HookHandler = (...args) => {
           const router = getHookRouter();
