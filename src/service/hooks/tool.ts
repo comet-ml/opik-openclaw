@@ -174,20 +174,23 @@ export function registerToolHooks(deps: ToolHooksDeps): void {
       spanUpdate.metadata = spanMetadata;
     }
 
-    if (event.error) {
-      const sanitizedError = sanitizeStringForOpik(event.error);
-      spanUpdate.output = { error: sanitizedError };
-      spanUpdate.errorInfo = {
-        exceptionType: "ToolError",
-        message: sanitizedError,
-        traceback: sanitizedError,
-      };
-    } else if (event.result !== undefined) {
+    if (event.result !== undefined) {
       const output =
         typeof event.result === "object" && event.result !== null
           ? (event.result as Record<string, unknown>)
           : { result: event.result };
       spanUpdate.output = sanitizeValueForOpik(output) as Record<string, unknown>;
+    }
+    if (event.error) {
+      const sanitizedError = sanitizeStringForOpik(event.error);
+      if (spanUpdate.output === undefined) {
+        spanUpdate.output = { error: sanitizedError };
+      }
+      spanUpdate.errorInfo = {
+        exceptionType: "ToolError",
+        message: sanitizedError,
+        traceback: sanitizedError,
+      };
     }
 
     if (Object.keys(spanUpdate).length > 0) {

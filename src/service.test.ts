@@ -1313,6 +1313,49 @@ describe("opik service", () => {
       expect(mockToolSpan.end).toHaveBeenCalled();
     });
 
+    test("keeps tool result as output when error is also present", async () => {
+      const { api, hooks } = createApi();
+      const mockToolSpan = opikState.createMockSpan();
+      const mockTrace = opikState.createMockTrace();
+      const mockLlmSpan = opikState.createMockSpan();
+      mockTrace.span.mockReturnValueOnce(mockLlmSpan);
+      mockLlmSpan.span.mockReturnValueOnce(mockToolSpan);
+      mockTraceFn.mockReturnValue(mockTrace);
+
+      const service = createOpikService(api as any);
+      await service.start(createServiceContext() as any);
+
+      invokeHook(hooks, "llm_input", { model: "m", provider: "p", prompt: "" }, agentCtx("s1"));
+      invokeHook(hooks, "before_tool_call", { toolName: "mcp_tool", params: {} }, toolCtx("s1"));
+      // Shape OpenClaw emits for an MCP CallToolResult with isError: true.
+      invokeHook(
+        hooks,
+        "after_tool_call",
+        {
+          toolName: "mcp_tool",
+          result: {
+            content: [{ type: "text", text: "Validation failed:\\nfield A is invalid" }],
+            details: { mcpServer: "db", mcpTool: "validate", status: "error" },
+          },
+          error: "error",
+        },
+        toolCtx("s1"),
+      );
+
+      expect(mockToolSpan.update).toHaveBeenCalledWith({
+        output: {
+          content: [{ type: "text", text: "Validation failed:\nfield A is invalid" }],
+          details: { mcpServer: "db", mcpTool: "validate", status: "error" },
+        },
+        errorInfo: {
+          exceptionType: "ToolError",
+          message: "error",
+          traceback: "error",
+        },
+      });
+      expect(mockToolSpan.end).toHaveBeenCalled();
+    });
+
     test("no-ops when no matching tool span", async () => {
       const { api, hooks } = createApi();
       const mockTrace = opikState.createMockTrace();
