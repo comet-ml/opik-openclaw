@@ -39,7 +39,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
-    "commander": "^14.0.3",
+    "commander": "^15.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
